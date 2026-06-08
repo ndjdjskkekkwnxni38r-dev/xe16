@@ -9,6 +9,7 @@ import {
   ScrollView,
   Dimensions,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import MapView, { Marker } from '@/components/Map';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +18,7 @@ import { COLORS, SPACING, BORDER_RADIUS, SHADOW } from '@/constants/theme';
 import { useCart } from '@/store/CartContext';
 import { useToast } from '@/components/Toast';
 import { ArrowLeft, Search, X, ChevronRight, Ticket } from 'lucide-react-native';
+import * as SecureStore from 'expo-secure-store';
 
 const { width, height } = Dimensions.get('window');
 
@@ -46,35 +48,74 @@ const VAN_TYPES = [
 export default function BookingScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { addItem } = useCart();
   const { showToast } = useToast();
+  
+  const [loading, setLoading] = useState(false);
   const [selectedType, setSelectedType] = useState('standard');
   const [destination, setDestination] = useState((params.destination as string) || '');
+  const pickup = "Cầu Rồng, Hải Châu, Đà Nẵng"; // Fixed for now based on UI
   const appliedPromo = params.promoCode as string;
 
-  const handleConfirmRide = () => {
+  const handleConfirmRide = async () => {
     if (!destination) {
       showToast({ message: 'Vui lòng nhập điểm đến', type: 'error' });
       return;
     }
 
     const selectedVan = VAN_TYPES.find(v => v.id === selectedType);
-    if (selectedVan) {
-      addItem({
-        id: `booking_${selectedType}_${Date.now()}`,
-        name: `${selectedVan.name} (Đến: ${destination})`,
-        price: selectedVan.price,
-        image: selectedVan.image,
-        type: 'booking',
-        shopName: 'Van Booking Service'
+    if (!selectedVan) return;
+
+    setLoading(true);
+    try {
+      let token = null;
+      if (Platform.OS === 'web') {
+        token = localStorage.getItem('access_token');
+      } else {
+        token = await SecureStore.getItemAsync('access_token');
+      }
+
+      if (!token) {
+        showToast({ message: 'Vui lòng đăng nhập để đặt xe', type: 'error' });
+        router.replace('/send-otp');
+        return;
+      }
+
+      const response = await fetch('https://admin.datxedulich.vip/api/customer/bookings/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          pickup_location: pickup,
+          destination_location: destination,
+          vehicle_type: selectedType,
+          total_price: selectedVan.price,
+          promo_code: appliedPromo || null,
+          payment_method: 'cash', // Default
+        }),
       });
-      
-      showToast({
-        message: 'Đã thêm chuyến đi vào giỏ hàng',
-        type: 'success'
-      });
-      
-      router.push('/cart');
+
+      const data = await response.json();
+
+      if (response.ok) {
+        showToast({
+          message: 'Đặt xe thành công! Tài xế đang đến.',
+          type: 'success'
+        });
+        
+        setTimeout(() => {
+          router.replace('/history');
+        }, 1500);
+      } else {
+        showToast({ message: data.message || 'Đặt xe thất bại', type: 'error' });
+      }
+    } catch (error) {
+      console.error('Booking Error:', error);
+      showToast({ message: 'Lỗi kết nối máy chủ', type: 'error' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -129,7 +170,7 @@ export default function BookingScreen() {
             <View style={styles.inputsBox}>
               <TouchableOpacity style={styles.inputRow}>
                 <Text style={styles.labelSmall}>ĐÓN TẠI</Text>
-                <Text style={styles.textMain} numberOfLines={1}>Cầu Rồng, Hải Châu, Đà Nẵng</Text>
+                <Text style={styles.textMain} numberOfLines={1}>{pickup}</Text>
               </TouchableOpacity>
               
               <View style={styles.thinDivider} />
@@ -217,10 +258,15 @@ export default function BookingScreen() {
           </View>
 
           <TouchableOpacity 
-            style={styles.confirmBtn}
+            style={[styles.confirmBtn, loading && styles.disabledBtn]}
             onPress={handleConfirmRide}
+            disabled={loading}
           >
-            <Text style={styles.confirmBtnText}>Thêm vào giỏ hàng</Text>
+            {loading ? (
+              <ActivityIndicator color="#FFF" />
+            ) : (
+              <Text style={styles.confirmBtnText}>Xác nhận đặt xe</Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -263,6 +309,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 25,
     ...SHADOW.md,
     shadowOpacity: 0.08,
+    zIndex: 100,
   },
   safeArea: {
     paddingBottom: 20,
@@ -366,6 +413,7 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.OS === 'ios' ? 40 : 20,
     ...SHADOW.lg,
     shadowOpacity: 0.2,
+    zIndex: 100,
   },
   dragHandleBox: {
     height: 24,
@@ -527,6 +575,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...SHADOW.md,
+  },
+  disabledBtn: {
+    opacity: 0.7,
   },
   confirmBtnText: {
     color: COLORS.white,
