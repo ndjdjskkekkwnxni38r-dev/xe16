@@ -1,47 +1,28 @@
-import React from 'react';
-import { StyleSheet, View, Text, Platform } from 'react-native';
-import { COLORS } from '@/constants/theme';
+import { Platform } from 'react-native';
 
-let MapView: any;
-let Marker: any;
+let MapView, Marker, Polyline, PROVIDER_GOOGLE;
 
-if (Platform.OS === 'web') {
-  // Mock cho Web
-  MapView = ({ children, style }: any) => (
-    <View style={[style, styles.webMap]}>
-      <Text style={styles.webMapText}>Bản đồ không hỗ trợ trên nền tảng Web</Text>
-      <Text style={styles.webMapSubtext}>Vui lòng sử dụng thiết bị Android hoặc iOS để xem bản đồ thực tế.</Text>
-      {children}
-    </View>
-  );
-  Marker = () => null;
-} else {
-  // Sử dụng thư viện gốc cho Mobile
-  const Maps = require('react-native-maps');
-  MapView = Maps.default;
-  Marker = Maps.Marker;
+try {
+  if (Platform.OS === 'web') {
+    const WebMaps = require('@teovilla/react-native-web-maps');
+    MapView = WebMaps.MapView || WebMaps.default || WebMaps;
+    Marker = WebMaps.Marker;
+    Polyline = WebMaps.Polyline;
+  } else {
+    // Forcefully require react-native-maps and check exports
+    const NativeMaps = require('react-native-maps');
+    
+    // Most robust way to access MapView in react-native-maps
+    MapView = NativeMaps.default || NativeMaps.MapView || NativeMaps;
+    
+    Marker = NativeMaps.Marker;
+    Polyline = NativeMaps.Polyline;
+    PROVIDER_GOOGLE = NativeMaps.PROVIDER_GOOGLE;
+  }
+} catch (e) {
+  console.error('Failed to load map components', e);
 }
 
-export { Marker };
+// Ensure exports are not undefined
+export { Marker, Polyline, PROVIDER_GOOGLE };
 export default MapView;
-
-const styles = StyleSheet.create({
-  webMap: {
-    backgroundColor: '#E5E5E5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  webMapText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    textAlign: 'center',
-  },
-  webMapSubtext: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginTop: 8,
-  },
-});

@@ -26,7 +26,7 @@ const CATEGORIES = [
   {
     id: "van",
     label: "Xe 16 chỗ",
-    icon: (props: any) => <Ionicons name="map" {...props} />,
+    icon: (props: any) => <MaterialCommunityIcons name="bus-side" {...props} />,
     color: "#0EA5E9",
     route: "/booking",
   },

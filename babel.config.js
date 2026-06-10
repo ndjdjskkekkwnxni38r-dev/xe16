@@ -7,7 +7,8 @@ module.exports = function(api) {
         'module-resolver',
         {
           alias: {
-            'react-native-maps': '@teovilla/react-native-web-maps',
+            '^react-native-maps$': '@teovilla/react-native-web-maps',
+            '^react-native-maps/(.*)': '@teovilla/react-native-web-maps',
           },
         },
       ],

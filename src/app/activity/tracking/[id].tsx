@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, SafeAreaView, StyleSheet, Image, Dimensio
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Phone, MessageSquare, ShieldAlert, Navigation } from 'lucide-react-native';
 import { COLORS, SHADOW } from '@/constants/theme';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import MapView, { Marker, Polyline } from '@/components/Map';
 
 const { width, height } = Dimensions.get('window');
 

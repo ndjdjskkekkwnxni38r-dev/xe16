@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker } from '@/components/Map';
 import { COLORS, SPACING, BORDER_RADIUS, SHADOW } from '@/constants/theme';
 
 const { width, height } = Dimensions.get('window');

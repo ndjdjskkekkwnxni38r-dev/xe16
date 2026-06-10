@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -11,7 +11,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import MapView, { Marker } from '@/components/Map';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { COLORS, SPACING, BORDER_RADIUS, SHADOW } from '@/constants/theme';
@@ -19,31 +19,10 @@ import { useCart } from '@/store/CartContext';
 import { useToast } from '@/components/Toast';
 import { ArrowLeft, Search, X, ChevronRight, Ticket } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
+import * as Linking from 'expo-linking';
+import { WebView } from 'react-native-webview';
 
 const { width, height } = Dimensions.get('window');
-
-const VAN_TYPES = [
-  {
-    id: 'standard',
-    name: '16 Chỗ Tiêu Chuẩn',
-    price: 250000,
-    priceStr: '250,000đ',
-    estimate: '5 phút',
-    image: 'https://img.freepik.com/premium-vector/van-car-isolated-white-background_1029473-50073.jpg',
-    desc: 'Xe đời mới, máy lạnh mát mẻ',
-    emoji: '🚐',
-  },
-  {
-    id: 'luxury',
-    name: '16 Chỗ Limousine',
-    price: 450000,
-    priceStr: '450,000đ',
-    estimate: '8 phút',
-    image: 'https://img.freepik.com/premium-vector/van-car-isolated-white-background_1029473-50073.jpg',
-    desc: 'Ghế da cao cấp, có cổng sạc USB',
-    emoji: '🚐✨',
-  },
-];
 
 export default function BookingScreen() {
   const router = useRouter();
@@ -51,10 +30,57 @@ export default function BookingScreen() {
   const { showToast } = useToast();
   
   const [loading, setLoading] = useState(false);
-  const [selectedType, setSelectedType] = useState('standard');
+  const [pricingLoading, setPricingLoading] = useState(false);
+  const [selectedType, setSelectedType] = useState<string | null>(null);
   const [destination, setDestination] = useState((params.destination as string) || '');
-  const pickup = "Cầu Rồng, Hải Châu, Đà Nẵng"; // Fixed for now based on UI
+  const [vehicleOptions, setVehicleOptions] = useState<any[]>([]);
+  
+  const pickup = "Cầu Rồng, Hải Châu, Đà Nẵng"; 
   const appliedPromo = params.promoCode as string;
+
+  // Gọi API lấy giá khi destination thay đổi
+  const fetchPricing = async (dest: string) => {
+    if (dest.length < 3) return;
+    setPricingLoading(true);
+    try {
+      let token = null;
+      if (Platform.OS === 'web') {
+        token = localStorage.getItem('access_token');
+      } else {
+        token = await SecureStore.getItemAsync('access_token');
+      }
+
+      const response = await fetch('https://admin.datxedulich.vip/api/customer/drivers/nearby', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ pickup_location: pickup, destination_location: dest }),
+      });
+      const data = await response.json();
+      
+      // Giả định response trả về danh sách xe hoặc đối tượng chứa danh sách xe
+      const vehicles = data.vehicles || data.data || data; 
+      
+      if (response.ok && Array.isArray(vehicles)) {
+        setVehicleOptions(vehicles);
+        if (vehicles.length > 0) setSelectedType(vehicles[0].id);
+      }
+    } catch (error) {
+      console.error('Fetch Pricing Error:', error);
+    } finally {
+      setPricingLoading(false);
+    }
+  };
+
+  // Debounce việc gọi API
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (destination) fetchPricing(destination);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [destination]);
 
   const handleConfirmRide = async () => {
     if (!destination) {
@@ -62,8 +88,11 @@ export default function BookingScreen() {
       return;
     }
 
-    const selectedVan = VAN_TYPES.find(v => v.id === selectedType);
-    if (!selectedVan) return;
+    const selectedVan = vehicleOptions.find(v => v.id === selectedType);
+    if (!selectedVan) {
+      showToast({ message: 'Vui lòng chọn loại xe', type: 'error' });
+      return;
+    }
 
     setLoading(true);
     try {
@@ -93,26 +122,19 @@ export default function BookingScreen() {
           vehicle_type: selectedType,
           total_price: selectedVan.price,
           promo_code: appliedPromo || null,
-          payment_method: 'cash', // Default
+          payment_method: 'cash',
         }),
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        showToast({
-          message: 'Đặt xe thành công! Tài xế đang đến.',
-          type: 'success'
-        });
-        
-        setTimeout(() => {
-          router.replace('/history');
-        }, 1500);
+        showToast({ message: 'Đặt xe thành công! Tài xế đang đến.', type: 'success' });
+        setTimeout(() => router.replace('/history'), 1500);
       } else {
         showToast({ message: data.message || 'Đặt xe thất bại', type: 'error' });
       }
     } catch (error) {
-      console.error('Booking Error:', error);
       showToast({ message: 'Lỗi kết nối máy chủ', type: 'error' });
     } finally {
       setLoading(false);
@@ -121,25 +143,35 @@ export default function BookingScreen() {
 
   return (
     <View style={styles.container}>
-      <MapView
-        style={styles.map}
-        initialRegion={{
-          latitude: 16.047079,
-          longitude: 108.206230,
-          latitudeDelta: 0.05,
-          longitudeDelta: 0.05,
-        }}
-      >
-        <Marker
-          coordinate={{ latitude: 16.047079, longitude: 108.206230 }}
-          title="Điểm đón"
-        >
-          <View style={styles.pickupMarker}>
-            <View style={styles.markerInner} />
-          </View>
-        </Marker>
-      </MapView>
-
+      <View style={{ flex: 1 }}>
+        <WebView
+          originWhitelist={['*']}
+          source={{ 
+            html: `
+              <!DOCTYPE html>
+              <html>
+                <head>
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <style>body { margin: 0; padding: 0; } #map { height: 100vh; width: 100vw; }</style>
+                  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+                  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+                </head>
+                <body>
+                  <div id="map"></div>
+                  <script>
+                    var map = L.map('map').setView([16.047079, 108.206230], 15);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '&copy; OpenStreetMap contributors'
+                    }).addTo(map);
+                    L.marker([16.047079, 108.206230]).addTo(map).bindPopup('Điểm đón');
+                  </script>
+                </body>
+              </html>
+            ` 
+          }}
+          style={{ flex: 1 }}
+        />
+      </View>
       {/* Modern Integrated Header */}
       <View style={styles.topHeaderArea}>
         <SafeAreaView style={styles.safeArea}>
@@ -213,27 +245,35 @@ export default function BookingScreen() {
         </View>
         
         <ScrollView style={styles.carScrollList} showsVerticalScrollIndicator={false}>
-          {VAN_TYPES.map((type) => (
-            <TouchableOpacity
-              key={type.id}
-              style={[
-                styles.carCard,
-                selectedType === type.id && styles.carCardActive,
-              ]}
-              onPress={() => setSelectedType(type.id)}
-            >
-              <View style={[styles.carIconBox, selectedType === type.id && styles.carIconBoxActive]}>
-                <Text style={styles.carEmojiText}>{type.emoji}</Text>
-              </View>
-              <View style={styles.carDetails}>
-                <View style={styles.carTopRow}>
-                  <Text style={styles.carNameText}>{type.name}</Text>
-                  <Text style={styles.carPriceText}>{type.priceStr}</Text>
-                </View>
-                <Text style={styles.carDescText}>{type.estimate} • {type.desc}</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
+          {vehicleOptions && vehicleOptions.length > 0 ? (
+            vehicleOptions.map((type, index) => {
+              const isActive = selectedType === type.id;
+              return (
+                <TouchableOpacity
+                  key={type.id || index}
+                  onPress={() => setSelectedType(type.id)}
+                  style={[styles.carCard, isActive && styles.carCardActive]}
+                >
+                  <View style={[styles.carIconBox, isActive && styles.carIconBoxActive]}>
+                    <Text style={styles.carEmojiText}>🚐</Text>
+                  </View>
+                  <View style={styles.carDetails}>
+                    <View style={styles.carTopRow}>
+                      <Text style={styles.carNameText}>{type.name || 'Xe 16 chỗ'}</Text>
+                      <Text style={styles.carPriceText}>
+                        {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(type.price || 0)}
+                      </Text>
+                    </View>
+                    <Text style={styles.carDescText}>Sẵn sàng đón bạn sau 5 phút</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })
+          ) : (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <Text style={{ color: '#757575' }}>Không có xe nào khả dụng</Text>
+            </View>
+          )}
         </ScrollView>
 
         <View style={styles.bottomFooter}>
