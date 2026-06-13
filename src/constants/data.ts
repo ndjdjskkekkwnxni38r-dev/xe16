@@ -720,3 +720,58 @@ export const RESTAURANTS = [
     ],
   },
 ];
+
+export type PlaceSuggestion = {
+  place_id: string;
+  description: string;
+  structured_formatting: { main_text: string; secondary_text: string };
+};
+
+/** Điểm đến phổ biến — gợi ý nhanh trong màn đặt xe */
+export const POPULAR_DESTINATIONS: PlaceSuggestion[] = [
+  {
+    place_id: 'popular-1',
+    description: 'Sân bay Quốc tế Đà Nẵng, Hải Châu, Đà Nẵng',
+    structured_formatting: { main_text: 'Sân bay Quốc tế Đà Nẵng', secondary_text: 'Hải Châu, Đà Nẵng' },
+  },
+  {
+    place_id: 'popular-2',
+    description: 'Bãi biển Mỹ Khê, Sơn Trà, Đà Nẵng',
+    structured_formatting: { main_text: 'Bãi biển Mỹ Khê', secondary_text: 'Sơn Trà, Đà Nẵng' },
+  },
+  {
+    place_id: 'popular-3',
+    description: 'Phố cổ Hội An, Quảng Nam',
+    structured_formatting: { main_text: 'Phố cổ Hội An', secondary_text: 'Quảng Nam' },
+  },
+  {
+    place_id: 'popular-4',
+    description: 'Bà Nà Hills, Hòa Vang, Đà Nẵng',
+    structured_formatting: { main_text: 'Bà Nà Hills', secondary_text: 'Hòa Vang, Đà Nẵng' },
+  },
+  {
+    place_id: 'popular-5',
+    description: 'Ngũ Hành Sơn, Đà Nẵng',
+    structured_formatting: { main_text: 'Ngũ Hành Sơn', secondary_text: 'Đà Nẵng' },
+  },
+  {
+    place_id: 'popular-6',
+    description: 'Chùa Linh Ứng, Bán đảo Sơn Trà, Đà Nẵng',
+    structured_formatting: { main_text: 'Chùa Linh Ứng', secondary_text: 'Bán đảo Sơn Trà, Đà Nẵng' },
+  },
+  {
+    place_id: 'popular-7',
+    description: 'Cầu Rồng, Hải Châu, Đà Nẵng',
+    structured_formatting: { main_text: 'Cầu Rồng', secondary_text: 'Hải Châu, Đà Nẵng' },
+  },
+  {
+    place_id: 'popular-8',
+    description: 'VinWonders Nam Hội An, Bình Minh, Thăng Bình, Quảng Nam',
+    structured_formatting: { main_text: 'VinWonders Nam Hội An', secondary_text: 'Bình Minh, Thăng Bình, Quảng Nam' },
+  },
+  {
+    place_id: 'popular-9',
+    description: 'Đèo Hải Vân, Hòa Hiệp Bắc, Liên Chiểu, Đà Nẵng',
+    structured_formatting: { main_text: 'Đèo Hải Vân', secondary_text: 'Liên Chiểu, Đà Nẵng' },
+  },
+];

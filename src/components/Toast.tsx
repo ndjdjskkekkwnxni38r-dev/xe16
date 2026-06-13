@@ -22,7 +22,7 @@ const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toast, setToast] = useState<{ id: number; message: string; type: ToastType } | null>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<any>(null);
 
   const showToast = useCallback(({ message, type = 'info', duration = 3000 }: ToastOptions) => {
     if (timeoutRef.current) {

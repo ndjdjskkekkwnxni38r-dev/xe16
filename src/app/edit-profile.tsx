@@ -76,7 +76,7 @@ export default function EditProfileScreen() {
         { text: "Hủy", style: "cancel" },
         { 
           text: "Cập nhật", 
-          onPress: (url) => {
+          onPress: (url?: string) => {
             if (url && url.trim() !== '') {
               setAvatarUri(url.trim());
               if (showToast) showToast({ message: 'Đã cập nhật ảnh đại diện', type: 'success' });

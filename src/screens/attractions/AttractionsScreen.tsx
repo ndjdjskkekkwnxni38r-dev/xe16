@@ -496,6 +496,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  flashSaleInfo: { flex: 1 },
   flashTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   flashSaleTitle: { color: COLORS.white, fontWeight: "900", fontSize: 15 },
   flashSaleTime: {

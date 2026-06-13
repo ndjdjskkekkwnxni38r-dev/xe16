@@ -14,7 +14,8 @@ const { width } = Dimensions.get('window');
 export default function CartScreen() {
   const router = useRouter();
   const { items, updateQuantity, removeItem, totalAmount, clearCart } = useCart();
-  const { balance, deductBalance } = useUser();
+  const { user, deductBalance } = useUser();
+  const balance = user?.balance ?? 0;
   const { showToast } = useToast();
 
   const handleCheckout = () => {
@@ -366,7 +367,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF', 
     alignItems: 'center', 
     justifyContent: 'center',
-    ...SHADOW.xs
+    ...SHADOW.sm
   },
   qtyValue: { marginHorizontal: 12, fontSize: 15, fontWeight: '800', color: '#0F172A' },
   removeItemBtn: { 
@@ -412,7 +413,7 @@ const styles = StyleSheet.create({
   discountValue: { fontSize: 14, color: '#F43F5E', fontWeight: '800' },
   divider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 4 },
   totalLabel: { fontSize: 18, fontWeight: '900', color: '#0F172A' },
-  totalValue: { fontSize: 22, fontWeight: '950', color: COLORS.primary },
+  totalValue: { fontSize: 22, fontWeight: '900', color: COLORS.primary },
   guaranteeBox: { 
     flexDirection: 'row', 
     alignItems: 'center', 
@@ -439,7 +440,7 @@ const styles = StyleSheet.create({
     borderColor: '#F9FAFB'
   },
   emptyBadgeText: { color: '#FFF', fontSize: 14, fontWeight: '900' },
-  emptyTitle: { fontSize: 24, fontWeight: '950', color: '#0F172A', marginBottom: 12 },
+  emptyTitle: { fontSize: 24, fontWeight: '900', color: '#0F172A', marginBottom: 12 },
   emptySubtitle: { fontSize: 15, color: '#64748B', textAlign: 'center', lineHeight: 24, marginBottom: 40 },
   exploreBtn: { width: '100%', borderRadius: 20, overflow: 'hidden', ...SHADOW.lg },
   exploreBtnGradient: { 
@@ -473,7 +474,7 @@ const styles = StyleSheet.create({
   footerContent: { flexDirection: 'row', alignItems: 'center', gap: 20 },
   priceContainer: { flex: 1 },
   totalPriceLabel: { fontSize: 13, color: '#94A3B8', fontWeight: '600', marginBottom: 2 },
-  totalPriceValue: { fontSize: 24, fontWeight: '950', color: COLORS.primary, letterSpacing: -0.5 },
+  totalPriceValue: { fontSize: 24, fontWeight: '900', color: COLORS.primary, letterSpacing: -0.5 },
   checkoutButton: { flex: 1.2, borderRadius: 20, overflow: 'hidden', ...SHADOW.md },
   checkoutGradient: { 
     flexDirection: 'row', 

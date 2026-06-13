@@ -1,28 +1,35 @@
-import React, { useState, useEffect } from 'react';
-import {
-  StyleSheet,
-  Text,
-  View,
-  TouchableOpacity,
-  SafeAreaView,
-  TextInput,
-  ScrollView,
-  Dimensions,
-  Platform,
-  ActivityIndicator,
-} from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { COLORS, SPACING, BORDER_RADIUS, SHADOW } from '@/constants/theme';
-import { useCart } from '@/store/CartContext';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from '@/components/Map';
 import { useToast } from '@/components/Toast';
-import { ArrowLeft, Search, X, ChevronRight, Ticket } from 'lucide-react-native';
+import { POPULAR_DESTINATIONS, type PlaceSuggestion } from '@/constants/data';
+import { COLORS, SHADOW } from '@/constants/theme';
+import { geocodeAddressFallback, getPlaceDetails, searchAddressSuggestions } from '@/services/addressSearch';
+import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import * as Linking from 'expo-linking';
-import { WebView } from 'react-native-webview';
+import { ArrowLeft, ChevronRight, Search, Ticket, X } from 'lucide-react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    ActivityIndicator,
+    Dimensions,
+    Keyboard,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
+const DEFAULT_REGION = {
+  latitude: 16.047079,
+  longitude: 108.206230,
+  latitudeDelta: 0.06,
+  longitudeDelta: 0.06,
+};
 
 export default function BookingScreen() {
   const router = useRouter();
@@ -34,9 +41,584 @@ export default function BookingScreen() {
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [destination, setDestination] = useState((params.destination as string) || '');
   const [vehicleOptions, setVehicleOptions] = useState<any[]>([]);
-  
-  const pickup = "Cầu Rồng, Hải Châu, Đà Nẵng"; 
+
+  const [pickup, setPickup] = useState("");
+  const [pickupSuggestions, setPickupSuggestions] = useState<any[]>([]);
+  const [destSuggestions, setDestSuggestions]     = useState<any[]>([]);
+  const [pickupFocused, setPickupFocused]         = useState(false);
+  const [destFocused, setDestFocused]             = useState(false);
+  const [destSuggestionsLoading, setDestSuggestionsLoading] = useState(false);
+
+  const destInputRef = useRef<TextInput>(null);
+  const destFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mapRef = useRef<any>(null);
+
+  const [pickupCoords, setPickupCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [destinationCoords, setDestinationCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [routeCoordinates, setRouteCoordinates] = useState<{ latitude: number; longitude: number }[]>([]);
+  const [mapRegion, setMapRegion] = useState(DEFAULT_REGION);
+
   const appliedPromo = params.promoCode as string;
+
+  const GOOGLE_KEY = "AIzaSyC6-7Vxt6ycQXeyIE3kVjus3_ZfneXv-T4";
+  const matchingPopular = destination
+    ? POPULAR_DESTINATIONS.filter(
+        (item) =>
+          item.structured_formatting.main_text.toLowerCase().includes(destination.toLowerCase()) ||
+          item.description.toLowerCase().includes(destination.toLowerCase())
+      )
+    : [];
+
+    const selectPickup = useCallback(async (address: string, placeId?: string) => {
+    console.log('[selectPickup] Called with address:', address, 'placeId:', placeId);
+    setPickup(address);
+    setPickupSuggestions([]);
+    setPickupFocused(false);
+
+    try {
+      // Get coordinates from place_id
+      let coords = null;
+      if (placeId) {
+        coords = await getPlaceDetails(placeId, address);
+      }
+      
+      if (!coords) {
+        console.log('[selectPickup] No coords from place details, trying fallback geocoding');
+        try {
+          const res = await fetch(
+            `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_KEY}&language=vi`
+          );
+          const data = await res.json();
+          if (data?.status === 'OK' && data.results?.length > 0) {
+            coords = {
+              latitude: data.results[0].geometry.location.lat,
+              longitude: data.results[0].geometry.location.lng,
+            };
+          } else {
+            // Use geocodeAddressFallback with rate limiting and error handling
+            coords = await geocodeAddressFallback(address);
+          }
+        } catch (fallbackError) {
+          console.error('[selectPickup] Fallback geocoding error:', fallbackError);
+          // Last resort: use geocodeAddressFallback
+          coords = await geocodeAddressFallback(address);
+        }
+      }
+      
+      if (!coords) {
+        console.error('[selectPickup] Cannot get coordinates, using default Đà Nẵng location');
+        coords = getDefaultDaNangCoords();
+        showToast({ 
+          message: 'Không tìm thấy địa chính xác. Sử dụng vị trí mặc định tại Đà Nẵng.', 
+          type: 'error' 
+        });
+      }
+      
+      console.log('[selectPickup] Got coords:', coords);
+      setPickupCoords(coords);
+
+      const nextRegion = {
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        latitudeDelta: 0.06,
+        longitudeDelta: 0.06,
+      };
+      setMapRegion(nextRegion);
+    } catch (e) {
+      console.error('[selectPickup] Error:', e);
+    }
+  }, []);
+
+    const selectDestination = useCallback(async (address: string, placeId?: string) => {
+    console.log('[selectDestination] Called with address:', address, 'placeId:', placeId);
+    setDestination(address);
+    setDestSuggestions([]);
+    setDestFocused(false);
+    destInputRef.current?.blur();
+    Keyboard.dismiss();
+
+    try {
+      // Try to get coordinates from place_id first, fallback to geocoding
+      let coords = null;
+      if (placeId) {
+        coords = await getPlaceDetails(placeId, address);
+      }
+      
+      // If no placeId or Places API failed, try fallback
+      if (!coords) {
+        console.log('[selectDestination] No coords from place details, trying fallback geocoding');
+        try {
+          const res = await fetch(
+            `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_KEY}&language=vi`
+          );
+          const data = await res.json();
+          if (data?.status === 'OK' && data.results?.length > 0) {
+            coords = {
+              latitude: data.results[0].geometry.location.lat,
+              longitude: data.results[0].geometry.location.lng,
+            };
+          } else {
+            const nomRes = await fetch(
+              `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
+              { headers: { 'User-Agent': 'VanBookingApp/1.0' } }
+            );
+            const nomText = await nomRes.text();
+            // Check if response is HTML instead of JSON
+            if (nomText.trim().startsWith('<')) {
+              console.warn('[selectDestination] Nominatim returned HTML, using geocodeAddressFallback');
+              coords = await geocodeAddressFallback(address);
+            } else {
+              try {
+                const nomData = JSON.parse(nomText);
+                if (nomData && nomData.length > 0) {
+                  coords = {
+                    latitude: parseFloat(nomData[0].lat),
+                    longitude: parseFloat(nomData[0].lon),
+                  };
+                }
+              } catch (parseError) {
+                console.warn('[selectDestination] JSON parse error, using geocodeAddressFallback');
+                coords = await geocodeAddressFallback(address);
+              }
+            }
+          }
+        } catch (fallbackError) {
+          console.error('[selectDestination] Fallback geocoding error:', fallbackError);
+          // Last resort: use geocodeAddressFallback
+          coords = await geocodeAddressFallback(address);
+        }
+      }
+      
+      if (!coords) {
+        console.error('[selectDestination] Cannot get coordinates, using default Đà Nẵng location');
+        coords = getDefaultDaNangCoords();
+        showToast({ 
+          message: 'Không tìm thấy địa chính xác. Sử dụng vị trí mặc định tại Đà Nẵng.', 
+          type: 'error' 
+        });
+      }
+      
+      console.log('[selectDestination] Got coords:', coords);
+      setDestinationCoords(coords);
+
+      const nextRegion = pickupCoords
+        ? {
+            latitude: (pickupCoords.latitude + coords.latitude) / 2,
+            longitude: (pickupCoords.longitude + coords.longitude) / 2,
+            latitudeDelta: Math.max(0.02, Math.abs(pickupCoords.latitude - coords.latitude) * 2.5),
+            longitudeDelta: Math.max(0.02, Math.abs(pickupCoords.longitude - coords.longitude) * 2.5),
+          }
+        : {
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            latitudeDelta: 0.06,
+            longitudeDelta: 0.06,
+          };
+
+      setMapRegion(nextRegion);
+
+      if (pickupCoords) {
+        console.log('[selectDestination] Calling fetchRoute with pickupCoords:', pickupCoords);
+        fetchRoute(pickupCoords, coords);
+      } else {
+        console.log('[selectDestination] No pickupCoords, skipping fetchRoute');
+      }
+    } catch (e) {
+      console.error('[selectDestination] Error:', e);
+    }
+  }, [pickupCoords]);
+
+  const renderDestSuggestionItem = (item: PlaceSuggestion, icon: 'star' | 'location' = 'location') => (
+    <TouchableOpacity
+      key={item.place_id}
+      style={styles.suggestionItem}
+      onPress={() => selectDestination(item.description, item.place_id)}
+    >
+      <Ionicons
+        name={icon === 'star' ? 'star-outline' : 'location-outline'}
+        size={14}
+        color={COLORS.primary}
+        style={{ marginRight: 8 }}
+      />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.suggestionMain} numberOfLines={1}>
+          {item.structured_formatting?.main_text || item.description}
+        </Text>
+        {!!item.structured_formatting?.secondary_text && (
+          <Text style={styles.suggestionSub} numberOfLines={1}>
+            {item.structured_formatting.secondary_text}
+          </Text>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+
+  const decodePolyline = (encoded: string) => {
+    const points: { latitude: number; longitude: number }[] = [];
+    let index = 0;
+    let lat = 0;
+    let lng = 0;
+
+    while (index < encoded.length) {
+      let result = 0;
+      let shift = 0;
+      let byte = 0;
+
+      do {
+        byte = encoded.charCodeAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20);
+
+      const deltaLat = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+      lat += deltaLat;
+
+      result = 0;
+      shift = 0;
+      do {
+        byte = encoded.charCodeAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20);
+
+      const deltaLng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+      lng += deltaLng;
+
+      points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
+    }
+
+    return points;
+  };
+
+  const fetchRoute = async (
+    origin: { latitude: number; longitude: number },
+    destination: { latitude: number; longitude: number },
+  ) => {
+    try {
+      console.log('[fetchRoute] Start with origin:', origin, 'destination:', destination);
+      
+      // Thử Google Directions API trước
+      try {
+        const response = await fetch(
+          `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&key=${GOOGLE_KEY}&language=vi&mode=driving`,
+        );
+        const data = await response.json();
+        console.log('[fetchRoute] Google API response status:', data?.status);
+        if (data?.status === 'OK' && data.routes?.length > 0) {
+          const polyline = data.routes[0].overview_polyline?.points;
+          console.log('[fetchRoute] Polyline encoded:', polyline ? 'exists' : 'null', 'length:', polyline?.length);
+          if (polyline) {
+            const coords = decodePolyline(polyline);
+            console.log('[fetchRoute] Decoded coords count:', coords.length);
+            setRouteCoordinates(coords);
+            if (coords.length > 0) {
+              mapRef.current?.fitToCoordinates(coords, {
+                edgePadding: { top: 120, right: 40, bottom: 240, left: 40 },
+                animated: true,
+              });
+            }
+            return;
+          }
+        }
+      } catch (googleError) {
+        console.warn('[fetchRoute] Google API failed, trying fallback:', googleError);
+      }
+
+      // Fallback 1: OpenRouteService (miễn phí, không cần key)
+      try {
+        console.log('[fetchRoute] Using OpenRouteService fallback');
+        const orsResponse = await fetch(
+          `https://api.openrouteservice.org/v2/directions/driving-car?start=${origin.longitude},${origin.latitude}&end=${destination.longitude},${destination.latitude}`,
+          {
+            headers: {
+              'Accept': 'application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8',
+            }
+          }
+        );
+        const orsData = await orsResponse.json();
+        console.log('[fetchRoute] OpenRouteService response status:', orsResponse.status);
+        
+        if (orsData.features && orsData.features.length > 0) {
+          const geometry = orsData.features[0].geometry;
+          if (geometry && geometry.coordinates) {
+            const coords = geometry.coordinates.map((coord: number[]) => ({
+              latitude: coord[1],
+              longitude: coord[0]
+            }));
+            console.log('[fetchRoute] OpenRouteService coords count:', coords.length);
+            setRouteCoordinates(coords);
+            if (coords.length > 0) {
+              mapRef.current?.fitToCoordinates(coords, {
+                edgePadding: { top: 120, right: 40, bottom: 240, left: 40 },
+                animated: true,
+              });
+            }
+            return;
+          }
+        }
+      } catch (orsError) {
+        console.warn('[fetchRoute] OpenRouteService failed, trying OSRM:', orsError);
+      }
+
+      // Fallback 2: OSRM (Open Source Routing Machine) - miễn phí, không cần key
+      console.log('[fetchRoute] Using OSRM fallback');
+      const osrmResponse = await fetch(
+        `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`
+      );
+      const osrmData = await osrmResponse.json();
+      console.log('[fetchRoute] OSRM response status:', osrmResponse.status);
+      
+      if (osrmData.code === 'Ok' && osrmData.routes && osrmData.routes.length > 0) {
+        const geometry = osrmData.routes[0].geometry;
+        if (geometry && geometry.coordinates) {
+          // OSRM trả về [lon, lat], cần chuyển sang [lat, lon]
+          const coords = geometry.coordinates.map((coord: number[]) => ({
+            latitude: coord[1],
+            longitude: coord[0]
+          }));
+          console.log('[fetchRoute] OSRM coords count:', coords.length);
+          setRouteCoordinates(coords);
+          if (coords.length > 0) {
+            mapRef.current?.fitToCoordinates(coords, {
+              edgePadding: { top: 120, right: 40, bottom: 240, left: 40 },
+              animated: true,
+            });
+          }
+        }
+      } else {
+        console.error('[fetchRoute] All routing services failed');
+      }
+    } catch (e) {
+      console.error('[fetchRoute] error:', e);
+    }
+  };
+
+  const fetchPlaceSuggestions = async (
+    text: string,
+    setter: (v: PlaceSuggestion[]) => void,
+    onLoading?: (loading: boolean) => void,
+  ) => {
+    if (text.trim().length < 2) {
+      setter([]);
+      onLoading?.(false);
+      return;
+    }
+    onLoading?.(true);
+    try {
+      const results = await searchAddressSuggestions(text);
+      setter(results);
+    } catch (e) {
+      console.error('fetchPlaceSuggestions error:', e);
+      setter([]);
+    } finally {
+      onLoading?.(false);
+    }
+  };
+
+  const handleDestinationChange = (text: string) => {
+    setDestination(text);
+    if (destFetchTimer.current) clearTimeout(destFetchTimer.current);
+    if (!text.trim()) {
+      setDestSuggestions([]);
+      setDestSuggestionsLoading(false);
+      return;
+    }
+    destFetchTimer.current = setTimeout(() => {
+      fetchPlaceSuggestions(text, setDestSuggestions, setDestSuggestionsLoading);
+    }, 300);
+  };
+
+  const handleDestinationSubmit = () => {
+    setTimeout(() => setDestFocused(false), 200);
+    if (destination.trim().length >= 3) {
+      selectDestination(destination);
+    }
+  };
+
+  const getCurrentLocation = async () => {
+    console.log('DEBUG: 1. getCurrentLocation triggered!');
+    setLoading(true);
+    try {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        showToast({ message: 'Cần quyền truy cập vị trí', type: 'error' });
+        setLoading(false);
+        return;
+      }
+
+      // Lấy tọa độ GPS với độ chính xác cao nhất
+      let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+      const { latitude, longitude } = location.coords;
+      setPickupCoords({ latitude, longitude });
+      setMapRegion({
+        latitude,
+        longitude,
+        latitudeDelta: 0.06,
+        longitudeDelta: 0.06,
+      });
+
+      // ============================================================
+      // Chạy SONG SONG 3 API cùng lúc, lấy kết quả nhanh nhất
+      // có chứa số nhà + tên đường
+      // ============================================================
+      const GOOGLE_KEY = "AIzaSyC6-7Vxt6ycQXeyIE3kVjus3_ZfneXv-T4"; // <= ĐÂY LÀ CHỖ CẦN KIỂM TRA
+
+      // --- Hàm fetch Google Maps Geocoding API ---
+      const fetchGoogle = async (): Promise<string> => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 4000);
+        const res = await fetch(
+          `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_KEY}&language=vi&result_type=street_address|premise`,
+          { signal: ctrl.signal }
+        );
+        clearTimeout(t);
+        const data = await res.json();
+        if (data?.status === 'OK' && data.results?.length > 0) {
+          // Ưu tiên kết quả có street_address hoặc premise (chứa số nhà)
+          const best = data.results.find((r: any) =>
+            r.types?.some((type: string) => ['street_address','premise','subpremise'].includes(type))
+          ) || data.results[0];
+          return best.formatted_address
+            .replace(/, Việt Nam$/, '')
+            .replace(/, Vietnam$/, '')
+            .trim();
+        }
+        return '';
+      };
+
+      // --- Hàm fetch OSM Nominatim ---
+      const fetchNominatim = async (): Promise<string> => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 3000);
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&addressdetails=1&accept-language=vi`,
+          { headers: { 'User-Agent': 'VanBookingApp/1.0' }, signal: ctrl.signal }
+        );
+        clearTimeout(t);
+        const data = await res.json();
+        if (data?.address) {
+          const a = data.address;
+          const houseNo = a.house_number || '';
+          const road    = a.road || a.pedestrian || a.footway || a.path || '';
+          const quarter = a.quarter || a.suburb || a.neighbourhood || '';
+          const district= a.city_district || a.county || '';
+          const city    = a.city || a.town || a.village || '';
+          const streetLine = [houseNo, road].filter(Boolean).join(' ');
+          return [streetLine, quarter, district, city].filter(Boolean).join(', ');
+        }
+        return '';
+      };
+
+      // --- Hàm truy vấn Overpass API — tìm node/building gần nhất có số nhà ---
+      const fetchOverpass = async (): Promise<string> => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 5000);
+        const query = `
+          [out:json][timeout:5];
+          (
+            node(around:80,${latitude},${longitude})["addr:housenumber"]["addr:street"];
+            way(around:80,${latitude},${longitude})["addr:housenumber"]["addr:street"];
+          );
+          out center 1;
+        `;
+        const res = await fetch('https://overpass-api.de/api/interpreter', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `data=${encodeURIComponent(query)}`,
+          signal: ctrl.signal,
+        });
+        clearTimeout(t);
+        const data = await res.json();
+        if (data?.elements?.length > 0) {
+          const el = data.elements[0];
+          const tags = el.tags || {};
+          const houseNo = tags['addr:housenumber'] || '';
+          const street  = tags['addr:street'] || '';
+          const ward    = tags['addr:suburb'] || tags['addr:quarter'] || '';
+          const district= tags['addr:district'] || tags['addr:county'] || '';
+          const city    = tags['addr:city'] || '';
+          const streetLine = [houseNo, street].filter(Boolean).join(' ');
+          return [streetLine, ward, district, city].filter(Boolean).join(', ');
+        }
+        return '';
+      };
+
+      // --- Chạy song song tất cả ---
+      const [googleRes, nominatimRes, overpassRes] = await Promise.allSettled([
+        fetchGoogle(),
+        fetchNominatim(),
+        fetchOverpass(),
+      ]);
+
+      const googleAddr    = googleRes.status    === 'fulfilled' ? googleRes.value    : '';
+      const nominatimAddr = nominatimRes.status === 'fulfilled' ? nominatimRes.value : '';
+      const overpassAddr  = overpassRes.status  === 'fulfilled' ? overpassRes.value  : '';
+
+      console.log('DEBUG Google:', googleAddr);
+      console.log('DEBUG Nominatim:', nominatimAddr);
+      console.log('DEBUG Overpass:', overpassAddr);
+
+      // Hàm kiểm tra xem địa chỉ có chứa số nhà không (bắt đầu bằng số)
+      const hasHouseNumber = (addr: string) => /^\d/.test(addr.trim());
+
+      // Ưu tiên: Overpass (chứa số nhà cụ thể) > Google > Nominatim
+      let formattedAddress =
+        (hasHouseNumber(overpassAddr)  ? overpassAddr  : '') ||
+        (hasHouseNumber(googleAddr)    ? googleAddr    : '') ||
+        (hasHouseNumber(nominatimAddr) ? nominatimAddr : '') ||
+        overpassAddr || googleAddr || nominatimAddr;
+
+      // Fallback cuối: Expo native geocoder
+      if (!formattedAddress) {
+        try {
+          const expoAddr = await Location.reverseGeocodeAsync({ latitude, longitude });
+          if (expoAddr.length > 0) {
+            const a = expoAddr[0];
+            const streetLine = [a.streetNumber, a.street].filter(Boolean).join(' ');
+            formattedAddress = [streetLine, a.district, a.city].filter(Boolean).join(', ');
+          }
+        } catch (_) {}
+      }
+
+      if (formattedAddress) {
+        setPickup(formattedAddress);
+        console.log('DEBUG Final pickup:', formattedAddress);
+      } else {
+        showToast({ message: 'Không tìm thấy địa chỉ', type: 'error' });
+        setPickup("Cầu Rồng, Hải Châu, Đà Nẵng");
+      }
+    } catch (error) {
+      console.error('Location Error:', error);
+      showToast({ message: 'Không thể lấy vị trí', type: 'error' });
+      setPickup("Cầu Rồng, Hải Châu, Đà Nẵng");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    getCurrentLocation();
+  }, []);
+
+  // Tự focus ô "ĐẾN ĐÂU?" để hiện gợi ý ngay khi vào màn hình
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      destInputRef.current?.focus();
+    }, 600);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (destFetchTimer.current) clearTimeout(destFetchTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (pickupCoords && destinationCoords) {
+      fetchRoute(pickupCoords, destinationCoords);
+    }
+  }, [pickupCoords, destinationCoords]);
 
   // Gọi API lấy giá khi destination thay đổi
   const fetchPricing = async (dest: string) => {
@@ -144,33 +726,27 @@ export default function BookingScreen() {
   return (
     <View style={styles.container}>
       <View style={{ flex: 1 }}>
-        <WebView
-          originWhitelist={['*']}
-          source={{ 
-            html: `
-              <!DOCTYPE html>
-              <html>
-                <head>
-                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                  <style>body { margin: 0; padding: 0; } #map { height: 100vh; width: 100vw; }</style>
-                  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
-                  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
-                </head>
-                <body>
-                  <div id="map"></div>
-                  <script>
-                    var map = L.map('map').setView([16.047079, 108.206230], 15);
-                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                        attribution: '&copy; OpenStreetMap contributors'
-                    }).addTo(map);
-                    L.marker([16.047079, 108.206230]).addTo(map).bindPopup('Điểm đón');
-                  </script>
-                </body>
-              </html>
-            ` 
-          }}
-          style={{ flex: 1 }}
-        />
+        <MapView
+          ref={mapRef}
+          style={styles.map}
+          provider={Platform.OS !== 'web' ? PROVIDER_GOOGLE : undefined}
+          region={mapRegion}
+          showsUserLocation
+        >
+          {pickupCoords && (
+            <Marker coordinate={pickupCoords} />
+          )}
+          {destinationCoords && (
+            <Marker coordinate={destinationCoords} />
+          )}
+          {routeCoordinates.length > 0 && (
+            <Polyline
+              coordinates={routeCoordinates}
+              strokeWidth={4}
+              strokeColor={COLORS.primary}
+            />
+          )}
+        </MapView>
       </View>
       {/* Modern Integrated Header */}
       <View style={styles.topHeaderArea}>
@@ -200,32 +776,172 @@ export default function BookingScreen() {
             </View>
             
             <View style={styles.inputsBox}>
-              <TouchableOpacity style={styles.inputRow}>
-                <Text style={styles.labelSmall}>ĐÓN TẠI</Text>
-                <Text style={styles.textMain} numberOfLines={1}>{pickup}</Text>
-              </TouchableOpacity>
-              
-              <View style={styles.thinDivider} />
-              
+              {/* ---- ĐÓN TẠI ---- */}
               <View style={styles.inputRow}>
-                <Text style={styles.labelSmall}>ĐẾN ĐÂU?</Text>
+                <Text style={styles.labelSmall}>ĐÓN TẠI</Text>
                 <View style={styles.searchRow}>
                   <TextInput
                     style={styles.fieldMain}
+                    placeholder="Nhập số nhà, tên đường..."
+                    value={pickup}
+                    onChangeText={(t) => {
+                      setPickup(t);
+                      fetchPlaceSuggestions(t, setPickupSuggestions);
+                    }}
+                    onFocus={() => setPickupFocused(true)}
+                    onBlur={() => setTimeout(() => setPickupFocused(false), 200)}
+                    placeholderTextColor="#9E9E9E"
+                  />
+                  <TouchableOpacity onPress={getCurrentLocation} style={styles.clearBtn}>
+                    <Ionicons name="location-outline" size={20} color={COLORS.primary} />
+                  </TouchableOpacity>
+                  {pickup ? (
+                    <TouchableOpacity onPress={() => { setPickup(''); setPickupSuggestions([]); }} style={styles.clearBtn}>
+                      <X size={16} color="#757575" />
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+                {/* Dropdown gợi ý địa chỉ đón */}
+                {pickupFocused && pickup && (
+                  <View style={styles.suggestionBox}>
+                    {/* Sử dụng địa chỉ đã nhập */}
+                    <TouchableOpacity
+                      style={styles.suggestionItem}
+                      onPress={() => {
+                        setPickup(pickup);
+                        setPickupSuggestions([]);
+                        setPickupFocused(false);
+                      }}
+                    >
+                      <Ionicons name="pin-outline" size={14} color={COLORS.primary} style={{ marginRight: 8 }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.suggestionMain} numberOfLines={1}>
+                          Sử dụng địa chỉ đã nhập
+                        </Text>
+                        <Text style={styles.suggestionSub} numberOfLines={1}>
+                          {pickup}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    {pickupSuggestions.map((item) => (
+                      <TouchableOpacity
+                        key={item.place_id}
+                        style={styles.suggestionItem}
+                        onPress={() => {
+                          selectPickup(item.description, item.place_id);
+                        }}
+                      >
+                        <Ionicons name="location-outline" size={14} color={COLORS.primary} style={{ marginRight: 8 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.suggestionMain} numberOfLines={1}>
+                            {item.structured_formatting?.main_text || item.description}
+                          </Text>
+                          <Text style={styles.suggestionSub} numberOfLines={1}>
+                            {item.structured_formatting?.secondary_text || ''}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.thinDivider} />
+
+              {/* ---- ĐẾN ĐÂU? ---- */}
+              <View style={[styles.inputRow, destFocused && styles.inputRowFocused]}>
+                <Text style={styles.labelSmall}>ĐẾN ĐÂU?</Text>
+                <View style={styles.searchRow}>
+                  <TextInput
+                    ref={destInputRef}
+                    style={styles.fieldMain}
                     placeholder="Nhập điểm đến của bạn"
                     value={destination}
-                    onChangeText={setDestination}
-                    autoFocus={!destination}
+                    onChangeText={handleDestinationChange}
+                    onFocus={() => setDestFocused(true)}
+                    onBlur={handleDestinationSubmit}
+                    onSubmitEditing={handleDestinationSubmit}
                     placeholderTextColor="#9E9E9E"
                   />
                   {destination ? (
-                    <TouchableOpacity onPress={() => setDestination('')} style={styles.clearBtn}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setDestination('');
+                        setDestSuggestions([]);
+                        setDestSuggestionsLoading(false);
+                      }}
+                      style={styles.clearBtn}
+                    >
                       <X size={16} color="#757575" />
                     </TouchableOpacity>
                   ) : (
                     <Search size={18} color={COLORS.primary} strokeWidth={2.5} />
                   )}
                 </View>
+
+                {destFocused && (
+                  <View style={styles.suggestionBox}>
+                    <ScrollView
+                      style={styles.suggestionScroll}
+                      nestedScrollEnabled
+                      keyboardShouldPersistTaps="handled"
+                      showsVerticalScrollIndicator={false}
+                    >
+                      {!destination ? (
+                        <>
+                          <Text style={styles.suggestionHeader}>ĐIỂM ĐẾN PHỔ BIẾN</Text>
+                          {POPULAR_DESTINATIONS.map((item) => renderDestSuggestionItem(item, 'star'))}
+                        </>
+                      ) : (
+                        <>
+                          <TouchableOpacity
+                            style={styles.suggestionItem}
+                            onPress={() => selectDestination(destination)}
+                          >
+                            <Ionicons name="pin-outline" size={14} color={COLORS.primary} style={{ marginRight: 8 }} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.suggestionMain} numberOfLines={1}>
+                                Sử dụng địa chỉ đã nhập
+                              </Text>
+                              <Text style={styles.suggestionSub} numberOfLines={1}>
+                                {destination}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+
+                          {matchingPopular.length > 0 && (
+                            <>
+                              <Text style={styles.suggestionHeader}>GỢI Ý PHÙ HỢP</Text>
+                              {matchingPopular.map((item) => renderDestSuggestionItem(item, 'star'))}
+                            </>
+                          )}
+
+                          {destSuggestionsLoading && (
+                            <View style={styles.suggestionLoading}>
+                              <ActivityIndicator size="small" color={COLORS.primary} />
+                              <Text style={styles.suggestionLoadingText}>Đang tìm địa chỉ...</Text>
+                            </View>
+                          )}
+
+                          {destSuggestions.length > 0 && (
+                            <>
+                              <Text style={styles.suggestionHeader}>ĐỊA CHỈ TÌM KIẾM</Text>
+                              {destSuggestions.map((item) => renderDestSuggestionItem(item, 'location'))}
+                            </>
+                          )}
+
+                          {!destSuggestionsLoading &&
+                            destSuggestions.length === 0 &&
+                            destination.trim().length >= 2 && (
+                              <Text style={styles.suggestionEmpty}>
+                                Không tìm thấy gợi ý — bạn có thể dùng địa chỉ đã nhập ở trên
+                              </Text>
+                            )}
+                        </>
+                      )}
+                    </ScrollView>
+                  </View>
+                )}
               </View>
             </View>
           </View>
@@ -252,8 +968,7 @@ export default function BookingScreen() {
                 <TouchableOpacity
                   key={type.id || index}
                   onPress={() => setSelectedType(type.id)}
-                  style={[styles.carCard, isActive && styles.carCardActive]}
-                >
+                  style={[styles.carCard, isActive && styles.carCardActive]}>
                   <View style={[styles.carIconBox, isActive && styles.carIconBoxActive]}>
                     <Text style={styles.carEmojiText}>🚐</Text>
                   </View>
@@ -349,7 +1064,8 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 25,
     ...SHADOW.md,
     shadowOpacity: 0.08,
-    zIndex: 100,
+    zIndex: 999,
+    overflow: 'visible',
   },
   safeArea: {
     paddingBottom: 20,
@@ -375,11 +1091,15 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     marginHorizontal: 16,
     marginTop: 10,
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
     borderRadius: 18,
     flexDirection: 'row',
     borderWidth: 1,
     borderColor: '#F0F0F0',
+    overflow: 'visible',
+    zIndex: 200,
   },
   pathIconBox: {
     alignItems: 'center',
@@ -410,6 +1130,34 @@ const styles = StyleSheet.create({
   },
   inputRow: {
     paddingVertical: 2,
+    zIndex: 100,
+    overflow: 'visible',
+  },
+  inputRowFocused: {
+    zIndex: 1000,
+  },
+  suggestionScroll: {
+    maxHeight: 220,
+  },
+  suggestionLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  suggestionLoadingText: {
+    fontSize: 12,
+    color: '#9E9E9E',
+    fontWeight: '500',
+  },
+  suggestionEmpty: {
+    fontSize: 12,
+    color: '#9E9E9E',
+    fontWeight: '500',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontStyle: 'italic',
   },
   labelSmall: {
     fontSize: 10,
@@ -441,6 +1189,48 @@ const styles = StyleSheet.create({
   },
   clearBtn: {
     padding: 4,
+  },
+  suggestionBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginTop: 6,
+    marginBottom: 4,
+    zIndex: 999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 10,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    overflow: 'hidden',
+  },
+  suggestionHeader: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#9E9E9E',
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+  },
+  suggestionMain: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#212121',
+    marginBottom: 1,
+  },
+  suggestionSub: {
+    fontSize: 11,
+    color: '#9E9E9E',
+    fontWeight: '400',
   },
   bottomSheet: {
     position: 'absolute',
@@ -625,3 +1415,5 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 });
+
+

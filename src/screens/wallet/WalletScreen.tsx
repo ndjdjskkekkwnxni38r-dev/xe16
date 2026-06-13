@@ -54,7 +54,8 @@ const TransactionItem = ({ type, title, date, amount, status }: any) => {
 
 export default function WalletScreen() {
   const router = useRouter();
-  const { balance } = useUser();
+  const { user } = useUser();
+  const balance = user?.balance ?? 0;
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

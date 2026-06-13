@@ -22,7 +22,7 @@ export default function VerifyOTPScreen() {
   const [timer, setTimer] = useState(60);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: any;
     if (timer > 0) {
       interval = setInterval(() => {
         setTimer((prev) => prev - 1);
@@ -141,14 +141,13 @@ export default function VerifyOTPScreen() {
                   <ShieldCheck size={20} color="#64748B" />
                 </View>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { letterSpacing: stepLetterSpacing(otp) }]}
                   value={otp}
                   onChangeText={setOtp}
                   keyboardType="number-pad"
                   placeholder="Nhập mã OTP"
                   placeholderTextColor="#94A3B8"
                   maxLength={6}
-                  letterSpacing={stepLetterSpacing(otp)}
                 />
               </View>
             </View>

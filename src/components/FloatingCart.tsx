@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCart } from '@/store/CartContext';
 import { COLORS, SHADOW } from '@/constants/theme';
-import Animated, { FadeInScale } from 'react-native-reanimated';
+import Animated, { ZoomIn } from 'react-native-reanimated';
 
 export default function FloatingCart() {
   const router = useRouter();
@@ -14,7 +14,7 @@ export default function FloatingCart() {
 
   return (
     <Animated.View 
-      entering={FadeInScale}
+      entering={ZoomIn}
       style={styles.container}
     >
       <TouchableOpacity 

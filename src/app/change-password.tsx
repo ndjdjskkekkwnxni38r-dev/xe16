@@ -33,7 +33,7 @@ export default function ChangePasswordScreen() {
     }
 
     if (newPwd.length < 6) {
-      if (showToast) showToast({ message: 'Mật khẩu mới phải có ít nhất 6 ký tự', type: 'warning' });
+      if (showToast) showToast({ message: 'Mật khẩu mới phải có ít nhất 6 ký tự', type: 'error' });
       return;
     }
 

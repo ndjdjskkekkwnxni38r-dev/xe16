@@ -4,7 +4,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, SHADOW } from '@/constants/theme';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeInDown, FadeInUp, SlideInBottom } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInUp, SlideInDown } from 'react-native-reanimated';
 import { useToast } from '@/components/Toast';
 
 const { width, height } = Dimensions.get('window');
@@ -244,7 +244,7 @@ export default function HotelScreen() {
       <Modal visible={showDateModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={styles.modalBg} activeOpacity={1} onPress={() => setShowDateModal(false)} />
-          <Animated.View entering={SlideInBottom} style={styles.modalContent}>
+          <Animated.View entering={SlideInDown} style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Chọn ngày nghỉ</Text>
               <TouchableOpacity onPress={() => setShowDateModal(false)}><Ionicons name="close" size={24} color="#1E293B" /></TouchableOpacity>
@@ -288,7 +288,7 @@ export default function HotelScreen() {
       <Modal visible={showGuestModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={styles.modalBg} activeOpacity={1} onPress={() => setShowGuestModal(false)} />
-          <Animated.View entering={SlideInBottom} style={styles.modalContent}>
+          <Animated.View entering={SlideInDown} style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Số lượng khách</Text>
               <TouchableOpacity onPress={() => setShowGuestModal(false)}><Ionicons name="close" size={24} color="#1E293B" /></TouchableOpacity>

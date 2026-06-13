@@ -122,7 +122,7 @@ export default function TrackingScreen() {
           if (router.canGoBack()) {
             router.back();
           } else {
-            router.replace('/(tabs)/activity');
+            router.replace('/(tabs)/explore');
           }
         }} activeOpacity={0.7}>
           <ArrowLeft size={24} color="#0F172A" />

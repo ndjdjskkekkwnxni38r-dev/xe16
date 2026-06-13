@@ -2,16 +2,6 @@ module.exports = function(api) {
   api.cache(true);
   return {
     presets: ['babel-preset-expo'],
-    plugins: [
-      [
-        'module-resolver',
-        {
-          alias: {
-            '^react-native-maps$': '@teovilla/react-native-web-maps',
-            '^react-native-maps/(.*)': '@teovilla/react-native-web-maps',
-          },
-        },
-      ],
-    ],
+    plugins: [],
   };
 };

@@ -5,7 +5,7 @@ import { COLORS, SPACING, BORDER_RADIUS, SHADOW } from '@/constants/theme';
 import { router } from 'expo-router';
 import { PROMOTIONS } from '@/constants/data';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeInDown, SlideInBottom } from 'react-native-reanimated';
+import Animated, { FadeInDown, SlideInDown } from 'react-native-reanimated';
 
 const { width, height } = Dimensions.get('window');
 
@@ -333,7 +333,7 @@ export default function ExpressScreen() {
             activeOpacity={1} 
             onPress={() => setIsPromoModalVisible(false)} 
           />
-          <Animated.View entering={SlideInBottom} style={styles.modalContent}>
+          <Animated.View entering={SlideInDown} style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Ưu đãi dành cho bạn</Text>
               <TouchableOpacity onPress={() => setIsPromoModalVisible(false)} style={styles.closeBtn}>

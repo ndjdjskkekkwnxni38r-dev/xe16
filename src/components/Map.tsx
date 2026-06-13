@@ -1,28 +1,31 @@
 import { Platform } from 'react-native';
 
-let MapView, Marker, Polyline, PROVIDER_GOOGLE;
+let MapView: any = null;
+let Marker: any = null;
+let Polyline: any = null;
+let PROVIDER_GOOGLE: any = null;
 
 try {
   if (Platform.OS === 'web') {
-    const WebMaps = require('@teovilla/react-native-web-maps');
-    MapView = WebMaps.MapView || WebMaps.default || WebMaps;
-    Marker = WebMaps.Marker;
-    Polyline = WebMaps.Polyline;
+    // Web: @teovilla/react-native-web-maps
+    const mod = require('@teovilla/react-native-web-maps');
+    MapView = mod.default || mod.MapView || mod;
+    Marker = mod.Marker;
+    Polyline = mod.Polyline;
+    PROVIDER_GOOGLE = 'google'; // Web doesn't use provider constant
   } else {
-    // Forcefully require react-native-maps and check exports
-    const NativeMaps = require('react-native-maps');
-    
-    // Most robust way to access MapView in react-native-maps
-    MapView = NativeMaps.default || NativeMaps.MapView || NativeMaps;
-    
-    Marker = NativeMaps.Marker;
-    Polyline = NativeMaps.Polyline;
-    PROVIDER_GOOGLE = NativeMaps.PROVIDER_GOOGLE;
+    // Native: react-native-maps
+    const mod = require('react-native-maps');
+    MapView = mod.default || mod.MapView || mod;
+    Marker = mod.Marker;
+    Polyline = mod.Polyline;
+    PROVIDER_GOOGLE = mod.PROVIDER_GOOGLE;
   }
 } catch (e) {
-  console.error('Failed to load map components', e);
+  console.error('[Map.tsx] Error loading maps:', e);
+  // Fallback: don't crash, just have null components
 }
 
-// Ensure exports are not undefined
 export { Marker, Polyline, PROVIDER_GOOGLE };
 export default MapView;
+
