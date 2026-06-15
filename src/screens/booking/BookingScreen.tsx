@@ -31,6 +31,11 @@ const DEFAULT_REGION = {
   longitudeDelta: 0.06,
 };
 
+const getDefaultDaNangCoords = () => ({
+  latitude: 16.047079,
+  longitude: 108.206230,
+});
+
 export default function BookingScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -40,7 +45,7 @@ export default function BookingScreen() {
   const [pricingLoading, setPricingLoading] = useState(false);
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [destination, setDestination] = useState((params.destination as string) || '');
-  const [vehicleOptions, setVehicleOptions] = useState<any[]>([]);
+  const [vehicleOptions, setVehicleOptions] = useState<any[] | null>(null);
 
   console.log('[BookingScreen] Initial vehicleOptions:', vehicleOptions);
 
@@ -73,7 +78,6 @@ export default function BookingScreen() {
 
   const appliedPromo = params.promoCode as string;
 
-  const GOOGLE_KEY = "AIzaSyC6-7Vxt6ycQXeyIE3kVjus3_ZfneXv-T4";
   const matchingPopular = destination
     ? POPULAR_DESTINATIONS.filter(
         (item) =>
@@ -83,68 +87,48 @@ export default function BookingScreen() {
     : [];
 
     const selectPickup = useCallback(async (address: string, placeId?: string) => {
-    console.log('[selectPickup] Called with address:', address, 'placeId:', placeId);
+    console.log('[selectPickup] Called with address:', address);
     setPickup(address);
     setPickupSuggestions([]);
     setPickupFocused(false);
 
     try {
-      // Get coordinates from place_id
+      // Dùng Nominatim để lấy tọa độ từ địa chỉ
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
+        { headers: { 'User-Agent': 'VanBookingApp/1.0' } }
+      );
+      const data = await res.json();
       let coords = null;
-      if (placeId) {
-        coords = await getPlaceDetails(placeId, address);
+      if (data && data.length > 0) {
+        coords = {
+          latitude: parseFloat(data[0].lat),
+          longitude: parseFloat(data[0].lon),
+        };
       }
       
       if (!coords) {
-        console.log('[selectPickup] No coords from place details, trying fallback geocoding');
-        try {
-          const res = await fetch(
-            `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_KEY}&language=vi`
-          );
-          const data = await res.json();
-          if (data?.status === 'OK' && data.results?.length > 0) {
-            coords = {
-              latitude: data.results[0].geometry.location.lat,
-              longitude: data.results[0].geometry.location.lng,
-            };
-          } else {
-            // Use geocodeAddressFallback with rate limiting and error handling
-            coords = await geocodeAddressFallback(address);
-          }
-        } catch (fallbackError) {
-          console.error('[selectPickup] Fallback geocoding error:', fallbackError);
-          // Last resort: use geocodeAddressFallback
-          coords = await geocodeAddressFallback(address);
-        }
+        coords = await geocodeAddressFallback(address);
       }
       
       if (!coords) {
-        console.error('[selectPickup] Cannot get coordinates, using default Đà Nẵng location');
         coords = getDefaultDaNangCoords();
-        showToast({ 
-          message: 'Không tìm thấy địa chính xác. Sử dụng vị trí mặc định tại Đà Nẵng.', 
-          type: 'error' 
-        });
       }
       
-      console.log('[selectPickup] Got coords:', coords);
       setPickupCoords(coords);
-      console.log('[selectPickup] setPickupCoords called with:', coords);
-
-      const nextRegion = {
+      setMapRegion({
         latitude: coords.latitude,
         longitude: coords.longitude,
         latitudeDelta: 0.06,
         longitudeDelta: 0.06,
-      };
-      setMapRegion(nextRegion);
+      });
     } catch (e) {
       console.error('[selectPickup] Error:', e);
     }
   }, []);
 
     const selectDestination = useCallback(async (address: string, placeId?: string) => {
-    console.log('[selectDestination] Called with address:', address, 'placeId:', placeId);
+    console.log('[selectDestination] Called with address:', address);
     setDestination(address);
     setDestSuggestions([]);
     setDestFocused(false);
@@ -152,69 +136,29 @@ export default function BookingScreen() {
     Keyboard.dismiss();
 
     try {
-      // Try to get coordinates from place_id first, fallback to geocoding
+      // Dùng Nominatim để lấy tọa độ từ địa chỉ
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
+        { headers: { 'User-Agent': 'VanBookingApp/1.0' } }
+      );
+      const data = await res.json();
       let coords = null;
-      if (placeId) {
-        coords = await getPlaceDetails(placeId, address);
-      }
-      
-      // If no placeId or Places API failed, try fallback
-      if (!coords) {
-        console.log('[selectDestination] No coords from place details, trying fallback geocoding');
-        try {
-          const res = await fetch(
-            `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_KEY}&language=vi`
-          );
-          const data = await res.json();
-          if (data?.status === 'OK' && data.results?.length > 0) {
-            coords = {
-              latitude: data.results[0].geometry.location.lat,
-              longitude: data.results[0].geometry.location.lng,
-            };
-          } else {
-            const nomRes = await fetch(
-              `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
-              { headers: { 'User-Agent': 'VanBookingApp/1.0' } }
-            );
-            const nomText = await nomRes.text();
-            // Check if response is HTML instead of JSON
-            if (nomText.trim().startsWith('<')) {
-              console.warn('[selectDestination] Nominatim returned HTML, using geocodeAddressFallback');
-              coords = await geocodeAddressFallback(address);
-            } else {
-              try {
-                const nomData = JSON.parse(nomText);
-                if (nomData && nomData.length > 0) {
-                  coords = {
-                    latitude: parseFloat(nomData[0].lat),
-                    longitude: parseFloat(nomData[0].lon),
-                  };
-                }
-              } catch (parseError) {
-                console.warn('[selectDestination] JSON parse error, using geocodeAddressFallback');
-                coords = await geocodeAddressFallback(address);
-              }
-            }
-          }
-        } catch (fallbackError) {
-          console.error('[selectDestination] Fallback geocoding error:', fallbackError);
-          // Last resort: use geocodeAddressFallback
-          coords = await geocodeAddressFallback(address);
-        }
+      if (data && data.length > 0) {
+        coords = {
+          latitude: parseFloat(data[0].lat),
+          longitude: parseFloat(data[0].lon),
+        };
       }
       
       if (!coords) {
-        console.error('[selectDestination] Cannot get coordinates, using default Đà Nẵng location');
+        coords = await geocodeAddressFallback(address);
+      }
+      
+      if (!coords) {
         coords = getDefaultDaNangCoords();
-        showToast({ 
-          message: 'Không tìm thấy địa chính xác. Sử dụng vị trí mặc định tại Đà Nẵng.', 
-          type: 'error' 
-        });
       }
       
-      console.log('[selectDestination] Got coords:', coords);
       setDestinationCoords(coords);
-      console.log('[selectDestination] setDestinationCoords called with:', coords);
 
       const nextRegion = pickupCoords
         ? {
@@ -233,10 +177,7 @@ export default function BookingScreen() {
       setMapRegion(nextRegion);
 
       if (pickupCoords) {
-        console.log('[selectDestination] Calling fetchRoute with pickupCoords:', pickupCoords);
         fetchRoute(pickupCoords, coords);
-      } else {
-        console.log('[selectDestination] No pickupCoords, skipping fetchRoute');
       }
     } catch (e) {
       console.error('[selectDestination] Error:', e);
@@ -268,130 +209,24 @@ export default function BookingScreen() {
     </TouchableOpacity>
   );
 
-  const decodePolyline = (encoded: string) => {
-    const points: { latitude: number; longitude: number }[] = [];
-    let index = 0;
-    let lat = 0;
-    let lng = 0;
-
-    while (index < encoded.length) {
-      let result = 0;
-      let shift = 0;
-      let byte = 0;
-
-      do {
-        byte = encoded.charCodeAt(index++) - 63;
-        result |= (byte & 0x1f) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-
-      const deltaLat = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
-      lat += deltaLat;
-
-      result = 0;
-      shift = 0;
-      do {
-        byte = encoded.charCodeAt(index++) - 63;
-        result |= (byte & 0x1f) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-
-      const deltaLng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
-      lng += deltaLng;
-
-      points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
-    }
-
-    return points;
-  };
-
   const fetchRoute = async (
     origin: { latitude: number; longitude: number },
     destination: { latitude: number; longitude: number },
   ) => {
     try {
-      console.log('[fetchRoute] Start with origin:', origin, 'destination:', destination);
-      
-      // Thử Google Directions API trước
-      try {
-        const response = await fetch(
-          `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&key=${GOOGLE_KEY}&language=vi&mode=driving`,
-        );
-        const data = await response.json();
-        console.log('[fetchRoute] Google API response status:', data?.status);
-        if (data?.status === 'OK' && data.routes?.length > 0) {
-          const polyline = data.routes[0].overview_polyline?.points;
-          console.log('[fetchRoute] Polyline encoded:', polyline ? 'exists' : 'null', 'length:', polyline?.length);
-          if (polyline) {
-            const coords = decodePolyline(polyline);
-            console.log('[fetchRoute] Decoded coords count:', coords.length);
-            setRouteCoordinates(coords);
-            if (coords.length > 0) {
-              mapRef.current?.fitToCoordinates(coords, {
-                edgePadding: { top: 120, right: 40, bottom: 240, left: 40 },
-                animated: true,
-              });
-            }
-            return;
-          }
-        }
-      } catch (googleError) {
-        console.warn('[fetchRoute] Google API failed, trying fallback:', googleError);
-      }
-
-      // Fallback 1: OpenRouteService (miễn phí, không cần key)
-      try {
-        console.log('[fetchRoute] Using OpenRouteService fallback');
-        const orsResponse = await fetch(
-          `https://api.openrouteservice.org/v2/directions/driving-car?start=${origin.longitude},${origin.latitude}&end=${destination.longitude},${destination.latitude}`,
-          {
-            headers: {
-              'Accept': 'application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8',
-            }
-          }
-        );
-        const orsData = await orsResponse.json();
-        console.log('[fetchRoute] OpenRouteService response status:', orsResponse.status);
-        
-        if (orsData.features && orsData.features.length > 0) {
-          const geometry = orsData.features[0].geometry;
-          if (geometry && geometry.coordinates) {
-            const coords = geometry.coordinates.map((coord: number[]) => ({
-              latitude: coord[1],
-              longitude: coord[0]
-            }));
-            console.log('[fetchRoute] OpenRouteService coords count:', coords.length);
-            setRouteCoordinates(coords);
-            if (coords.length > 0) {
-              mapRef.current?.fitToCoordinates(coords, {
-                edgePadding: { top: 120, right: 40, bottom: 240, left: 40 },
-                animated: true,
-              });
-            }
-            return;
-          }
-        }
-      } catch (orsError) {
-        console.warn('[fetchRoute] OpenRouteService failed, trying OSRM:', orsError);
-      }
-
-      // Fallback 2: OSRM (Open Source Routing Machine) - miễn phí, không cần key
       console.log('[fetchRoute] Using OSRM fallback');
       const osrmResponse = await fetch(
         `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`
       );
       const osrmData = await osrmResponse.json();
-      console.log('[fetchRoute] OSRM response status:', osrmResponse.status);
       
       if (osrmData.code === 'Ok' && osrmData.routes && osrmData.routes.length > 0) {
         const geometry = osrmData.routes[0].geometry;
         if (geometry && geometry.coordinates) {
-          // OSRM trả về [lon, lat], cần chuyển sang [lat, lon]
           const coords = geometry.coordinates.map((coord: number[]) => ({
             latitude: coord[1],
             longitude: coord[0]
           }));
-          console.log('[fetchRoute] OSRM coords count:', coords.length);
           setRouteCoordinates(coords);
           if (coords.length > 0) {
             mapRef.current?.fitToCoordinates(coords, {
@@ -400,8 +235,6 @@ export default function BookingScreen() {
             });
           }
         }
-      } else {
-        console.error('[fetchRoute] All routing services failed');
       }
     } catch (e) {
       console.error('[fetchRoute] error:', e);
@@ -478,29 +311,6 @@ export default function BookingScreen() {
       // ============================================================
       const GOOGLE_KEY = "AIzaSyC6-7Vxt6ycQXeyIE3kVjus3_ZfneXv-T4"; // <= ĐÂY LÀ CHỖ CẦN KIỂM TRA
 
-      // --- Hàm fetch Google Maps Geocoding API ---
-      const fetchGoogle = async (): Promise<string> => {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 4000);
-        const res = await fetch(
-          `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_KEY}&language=vi&result_type=street_address|premise`,
-          { signal: ctrl.signal }
-        );
-        clearTimeout(t);
-        const data = await res.json();
-        if (data?.status === 'OK' && data.results?.length > 0) {
-          // Ưu tiên kết quả có street_address hoặc premise (chứa số nhà)
-          const best = data.results.find((r: any) =>
-            r.types?.some((type: string) => ['street_address','premise','subpremise'].includes(type))
-          ) || data.results[0];
-          return best.formatted_address
-            .replace(/, Việt Nam$/, '')
-            .replace(/, Vietnam$/, '')
-            .trim();
-        }
-        return '';
-      };
-
       // --- Hàm fetch OSM Nominatim ---
       const fetchNominatim = async (): Promise<string> => {
         const ctrl = new AbortController();
@@ -558,30 +368,26 @@ export default function BookingScreen() {
         return '';
       };
 
-      // --- Chạy song song tất cả ---
-      const [googleRes, nominatimRes, overpassRes] = await Promise.allSettled([
-        fetchGoogle(),
+      // --- Chạy song song ---
+      const [nominatimRes, overpassRes] = await Promise.allSettled([
         fetchNominatim(),
         fetchOverpass(),
       ]);
 
-      const googleAddr    = googleRes.status    === 'fulfilled' ? googleRes.value    : '';
       const nominatimAddr = nominatimRes.status === 'fulfilled' ? nominatimRes.value : '';
       const overpassAddr  = overpassRes.status  === 'fulfilled' ? overpassRes.value  : '';
 
-      console.log('DEBUG Google:', googleAddr);
       console.log('DEBUG Nominatim:', nominatimAddr);
       console.log('DEBUG Overpass:', overpassAddr);
 
       // Hàm kiểm tra xem địa chỉ có chứa số nhà không (bắt đầu bằng số)
       const hasHouseNumber = (addr: string) => /^\d/.test(addr.trim());
 
-      // Ưu tiên: Overpass (chứa số nhà cụ thể) > Google > Nominatim
+      // Ưu tiên: Overpass (chứa số nhà cụ thể) > Nominatim
       let formattedAddress =
         (hasHouseNumber(overpassAddr)  ? overpassAddr  : '') ||
-        (hasHouseNumber(googleAddr)    ? googleAddr    : '') ||
         (hasHouseNumber(nominatimAddr) ? nominatimAddr : '') ||
-        overpassAddr || googleAddr || nominatimAddr;
+        overpassAddr || nominatimAddr;
 
       // Fallback cuối: Expo native geocoder
       if (!formattedAddress) {
@@ -602,6 +408,7 @@ export default function BookingScreen() {
         showToast({ message: 'Không tìm thấy địa chỉ', type: 'error' });
         setPickup("Cầu Rồng, Hải Châu, Đà Nẵng");
       }
+      console.log('DEBUG: pickupCoords set to:', { latitude, longitude });
     } catch (error) {
       console.error('Location Error:', error);
       showToast({ message: 'Không thể lấy vị trí', type: 'error' });
@@ -612,7 +419,27 @@ export default function BookingScreen() {
   };
 
   useEffect(() => {
-    getCurrentLocation();
+    const initializeBooking = async () => {
+      // 1. Lấy vị trí đón
+      await getCurrentLocation();
+      
+      // 2. Nếu có điểm đến trong params, giải mã nó
+      let destCoords = null;
+      if (params.destination) {
+        console.log('[initializeBooking] Destination param found, geocoding:', params.destination);
+        destCoords = await selectDestination(params.destination as string);
+      }
+      
+      // 3. Sau khi đảm bảo đã có đủ cả 2 tọa độ (đón + đến), gọi API lấy giá
+      // Lưu ý: selectDestination cập nhật state destinationCoords bất đồng bộ,
+      // nên chúng ta có thể cần đợi một chút hoặc sử dụng kết quả trả về.
+      // Ở đây, tôi sẽ gọi fetchPricing trực tiếp với các giá trị hiện có.
+      // Vì `pickupCoords` được set trong `getCurrentLocation` (await), 
+      // và `destinationCoords` được set trong `selectDestination` (await).
+      
+      console.log('[initializeBooking] Finished initialization.');
+    };
+    initializeBooking();
   }, []);
 
   // Tự focus ô "ĐẾN ĐÂU?" để hiện gợi ý ngay khi vào màn hình
@@ -637,7 +464,7 @@ export default function BookingScreen() {
 
   // Gọi API lấy giá khi destination thay đổi
   const fetchPricing = async (dest: string) => {
-    if (dest.length < 3) return;
+    // if (dest.length < 3) return; // Removed this constraint to ensure API call happens
     setPricingLoading(true);
     try {
       let token = null;
@@ -654,18 +481,21 @@ export default function BookingScreen() {
         return;
       }
 
+      const body = {
+        pickup_lat: pickupCoords.latitude,
+        pickup_lng: pickupCoords.longitude,
+        dropoff_lat: destinationCoords.latitude,
+        dropoff_lng: destinationCoords.longitude,
+      };
+      console.log('[fetchPricing] Sending Body:', body);
+
       const response = await fetch('https://admin.datxedulich.vip/api/customer/drivers/nearby', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify({ 
-          pickup_lat: pickupCoords.latitude,
-          pickup_lng: pickupCoords.longitude,
-          dropoff_lat: destinationCoords.latitude,
-          dropoff_lng: destinationCoords.longitude,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await response.json();
       
@@ -678,15 +508,18 @@ export default function BookingScreen() {
         // Map API fields to expected format
         const mappedVehicles = apiVehicles.map((v: any) => ({
           id: v.vehicle_type_id?.toString() || v.id?.toString(),
+          quote_id: v.quote_id, // Capture quote_id from API
           name: v.name,
           price: v.final_price || v.price || v.estimated_price,
           description: v.description,
           is_available: v.is_available,
-          eta_minutes: v.eta_minutes,
+          eta_minutes: v.eta_minutes || 5, // Default to 5 if missing
           icon_url: v.icon_url,
-        })).filter((v: any) => v.is_available !== false); // Filter out unavailable vehicles
+        }))
+        .filter((v: any) => v.is_available !== false) // Filter out unavailable vehicles
+        .sort((a: any, b: any) => a.eta_minutes - b.eta_minutes); // Sort by ETA (nearest first)
         
-        console.log('[fetchPricing] Mapped vehicles:', mappedVehicles);
+        console.log('[fetchPricing] Mapped & Sorted vehicles:', mappedVehicles);
         
         if (mappedVehicles.length > 0) {
           setVehicleOptions(mappedVehicles);
@@ -707,13 +540,19 @@ export default function BookingScreen() {
     }
   };
 
-  // Debounce việc gọi API
+  // Gọi API lấy giá khi destinationCoords hoặc pickupCoords thay đổi
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (destination) fetchPricing(destination);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [destination]);
+    console.log('[DEBUG] useEffect triggered. State check:');
+    console.log(' - destinationCoords:', destinationCoords);
+    console.log(' - pickupCoords:', pickupCoords);
+    
+    if (destinationCoords && pickupCoords) {
+      console.log('[DEBUG] Both coords present, calling fetchPricing.');
+      fetchPricing(destination);
+    } else {
+      console.log('[DEBUG] Missing coords, skipping fetchPricing.');
+    }
+  }, [destinationCoords, pickupCoords]);
 
   const handleConfirmRide = async () => {
     if (!destination) {
@@ -753,6 +592,7 @@ export default function BookingScreen() {
           pickup_location: pickup,
           destination_location: destination,
           vehicle_type: selectedType,
+          quote_id: selectedVan.quote_id, // Add quote_id here
           total_price: selectedVan.price,
           promo_code: appliedPromo || null,
           payment_method: 'cash',
@@ -1014,17 +854,28 @@ export default function BookingScreen() {
                   key={type.id || index}
                   onPress={() => setSelectedType(type.id)}
                   style={[styles.carCard, isActive && styles.carCardActive]}>
-                  <View style={[styles.carIconBox, isActive && styles.carIconBoxActive]}>
+                  
+                  {/* Selection Indicator */}
+                  <View style={[styles.radioCircle, isActive && styles.radioCircleActive]}>
+                    {isActive && <View style={styles.radioInner} />}
+                  </View>
+
+                  {/* Vehicle Icon */}
+                  <View style={styles.carIconBox}>
                     <Text style={styles.carEmojiText}>🚐</Text>
                   </View>
+                  
+                  {/* Vehicle Info */}
                   <View style={styles.carDetails}>
-                    <View style={styles.carTopRow}>
-                      <Text style={styles.carNameText}>{type.name || 'Xe 16 chỗ'}</Text>
-                      <Text style={styles.carPriceText}>
-                        {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(type.price || 0)}
-                      </Text>
-                    </View>
-                    <Text style={styles.carDescText}>Sẵn sàng đón bạn sau 5 phút</Text>
+                    <Text style={styles.carNameText}>{type.name || 'Xe 16 chỗ'}</Text>
+                    <Text style={styles.carDescText}>Đến nơi sau 5 phút</Text>
+                  </View>
+
+                  {/* Price */}
+                  <View style={styles.carPriceBox}>
+                    <Text style={styles.carPriceText}>
+                      {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(type.price || 0)}
+                    </Text>
                   </View>
                 </TouchableOpacity>
               );
@@ -1268,11 +1119,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: "#000",
+    backgroundColor: COLORS.white,
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
     paddingBottom: Platform.OS === 'android' ? 15 : 4,
-    maxHeight: Platform.OS === 'android' ? '350' : '400',
+    minHeight: 250,
+    maxHeight: 500,
     ...SHADOW.lg,
     shadowOpacity: 0.2,
     zIndex: 100,
@@ -1312,7 +1164,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   carScrollList: {
-    maxHeight: Platform.OS === 'ios' ? 100 : 70,
+    maxHeight: 300,
     paddingHorizontal: 16,
   },
   carCard: {
@@ -1354,8 +1206,30 @@ const styles = StyleSheet.create({
   carEmojiText: {
     fontSize: 16,
   },
+  radioCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: '#E0E0E0',
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioCircleActive: {
+    borderColor: COLORS.primary,
+  },
+  radioInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.primary,
+  },
   carDetails: {
     flex: 1,
+  },
+  carPriceBox: {
+    marginLeft: 8,
   },
   carTopRow: {
     flexDirection: 'row',
