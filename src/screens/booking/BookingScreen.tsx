@@ -21,7 +21,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
 const DEFAULT_REGION = {
@@ -499,23 +499,26 @@ export default function BookingScreen() {
       });
       const data = await response.json();
       
-      console.log('[fetchPricing] API Response:', data);
+      console.log('[fetchPricing] FULL API Response:', JSON.stringify(data, null, 2));
       
       // Map API response format to expected format
-      const apiVehicles = data.vehicles || data.data || data;
+      const apiVehicles = data.data || [];
+      const rootQuoteId = data.quote_id; 
       
       if (response.ok && Array.isArray(apiVehicles) && apiVehicles.length > 0) {
         // Map API fields to expected format
-        const mappedVehicles = apiVehicles.map((v: any) => ({
-          id: v.vehicle_type_id?.toString() || v.id?.toString(),
-          quote_id: v.quote_id, // Capture quote_id from API
-          name: v.name,
-          price: v.final_price || v.price || v.estimated_price,
-          description: v.description,
-          is_available: v.is_available,
-          eta_minutes: v.eta_minutes || 5, // Default to 5 if missing
-          icon_url: v.icon_url,
-        }))
+        const mappedVehicles = apiVehicles.map((v: any) => {
+          return {
+            id: v.vehicle_type_id?.toString(),
+            quote_id: rootQuoteId, // Assign root quote_id to each vehicle
+            name: v.name,
+            price: v.final_price || v.price || v.estimated_price,
+            description: v.description,
+            is_available: v.is_available,
+            eta_minutes: v.eta_minutes || 5, 
+            icon_url: v.icon_url,
+          };
+        })
         .filter((v: any) => v.is_available !== false) // Filter out unavailable vehicles
         .sort((a: any, b: any) => a.eta_minutes - b.eta_minutes); // Sort by ETA (nearest first)
         
@@ -555,17 +558,33 @@ export default function BookingScreen() {
   }, [destinationCoords, pickupCoords]);
 
   const handleConfirmRide = async () => {
+    console.log('[handleConfirmRide] Starting...');
+    console.log('[handleConfirmRide] Current pickup:', pickup);
+    console.log('[handleConfirmRide] Current destination:', destination);
+
+    if (!pickup) {
+        console.log('[handleConfirmRide] Error: Pickup address missing');
+        showToast({ message: 'Vui lòng nhập điểm đón', type: 'error' });
+        return;
+    }
+
     if (!destination) {
+      console.log('[handleConfirmRide] Error: Destination missing');
       showToast({ message: 'Vui lòng nhập điểm đến', type: 'error' });
       return;
     }
 
-    const selectedVan = vehicleOptions.find(v => v.id === selectedType);
+    console.log('[handleConfirmRide] selectedType:', selectedType);
+    console.log('[handleConfirmRide] vehicleOptions:', vehicleOptions);
+    const selectedVan = vehicleOptions?.find(v => v.id === selectedType);
+    
     if (!selectedVan) {
+      console.log('[handleConfirmRide] Error: Van not found or not selected');
       showToast({ message: 'Vui lòng chọn loại xe', type: 'error' });
       return;
     }
 
+    console.log('[handleConfirmRide] Selected Van:', selectedVan);
     setLoading(true);
     try {
       let token = null;
@@ -576,10 +595,22 @@ export default function BookingScreen() {
       }
 
       if (!token) {
+        console.log('[handleConfirmRide] Error: Token missing');
         showToast({ message: 'Vui lòng đăng nhập để đặt xe', type: 'error' });
         router.replace('/send-otp');
         return;
       }
+
+      const bodyData = {
+        pickup_address: pickup,
+        dropoff_address: destination, // Changed from destination_address
+        vehicle_type_id: selectedType,
+        quote_id: selectedVan.quote_id,
+        total_price: selectedVan.price,
+        promo_code: appliedPromo || null,
+        payment_method: 'cash',
+      };
+      console.log('[handleConfirmRide] Sending Booking Body:', bodyData);
 
       const response = await fetch('https://admin.datxedulich.vip/api/customer/bookings/create', {
         method: 'POST',
@@ -588,18 +619,11 @@ export default function BookingScreen() {
           'Authorization': `Bearer ${token}`,
           'Accept': 'application/json',
         },
-        body: JSON.stringify({
-          pickup_location: pickup,
-          destination_location: destination,
-          vehicle_type: selectedType,
-          quote_id: selectedVan.quote_id, // Add quote_id here
-          total_price: selectedVan.price,
-          promo_code: appliedPromo || null,
-          payment_method: 'cash',
-        }),
+        body: JSON.stringify(bodyData),
       });
 
       const data = await response.json();
+      console.log('[handleConfirmRide] Booking API Response:', response.status, data);
 
       if (response.ok) {
         showToast({ message: 'Đặt xe thành công! Tài xế đang đến.', type: 'success' });
@@ -608,6 +632,7 @@ export default function BookingScreen() {
         showToast({ message: data.message || 'Đặt xe thất bại', type: 'error' });
       }
     } catch (error) {
+      console.error('[handleConfirmRide] Catch error:', error);
       showToast({ message: 'Lỗi kết nối máy chủ', type: 'error' });
     } finally {
       setLoading(false);
@@ -882,8 +907,7 @@ export default function BookingScreen() {
             })
           ) : (
             <View style={{ padding: 20, alignItems: 'center' }}>
-              <Text style={{ color: '#757575' }}>Không có xe nào khả dụng</Text>
-              <Text style={{ color: '#9E9E9E', fontSize: 12, marginTop: 4 }}>vehicleOptions: {JSON.stringify(vehicleOptions)}</Text>
+              <Text style={{ color: '#757575' }}>{vehicleOptions === null ? 'Đang tìm xe...' : 'Không có xe nào khả dụng'}</Text>
             </View>
           )}
         </ScrollView>
@@ -1255,6 +1279,9 @@ const styles = StyleSheet.create({
   bottomFooter: {
     paddingHorizontal: 16,
     marginTop: 4,
+    marginBottom: 20,
+    zIndex: 1000,
+    elevation: 10,
   },
   quickOptions: {
     flexDirection: 'row',
