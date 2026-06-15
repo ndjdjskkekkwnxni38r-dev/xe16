@@ -1,14 +1,14 @@
 export const COLORS = {
-  primary: '#0EA5E9', // Sky Azure (Rực rỡ, lộng lẫy)
-  secondary: '#3B82F6', // Ocean Blue
-  accent: '#F472B6', // Rose Quartz (Điểm nhấn lộng lẫy)
-  background: '#F0F9FF', // Light Sky
+  primary: '#F97316', // Orange
+  secondary: '#EA580C', // Darker Orange
+  accent: '#FBBF24', // Yellow accent
+  background: '#F5F5F5', // Light gray background
   surface: '#FFFFFF',
-  text: '#0369A1', // Deep Azure
-  textSecondary: '#64748B',
-  border: '#BAE6FD',
+  text: '#1A1A1A', // Dark text
+  textSecondary: '#757575',
+  border: '#E0E0E0',
   error: '#FF4D4F',
-  success: '#00B14F',
+  success: '#F97316',
   white: '#FFFFFF',
   black: '#000000',
   transparent: 'transparent',
@@ -33,21 +33,21 @@ export const BORDER_RADIUS = {
 
 export const SHADOW = {
   sm: {
-    shadowColor: '#0EA5E9',
+    shadowColor: '#F97316',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
   md: {
-    shadowColor: '#0369A1',
+    shadowColor: '#F97316',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.15,
     shadowRadius: 12,
     elevation: 6,
   },
   lg: {
-    shadowColor: '#0EA5E9',
+    shadowColor: '#F97316',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.2,
     shadowRadius: 20,

@@ -7,19 +7,19 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import { ArrowLeft, ChevronRight, Search, Ticket, X } from 'lucide-react-native';
+import { ArrowLeft, Search, X } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Dimensions,
-    Keyboard,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Dimensions,
+  Keyboard,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -42,6 +42,13 @@ export default function BookingScreen() {
   const [destination, setDestination] = useState((params.destination as string) || '');
   const [vehicleOptions, setVehicleOptions] = useState<any[]>([]);
 
+  console.log('[BookingScreen] Initial vehicleOptions:', vehicleOptions);
+
+  // Log whenever vehicleOptions changes
+  useEffect(() => {
+    console.log('[BookingScreen] vehicleOptions changed:', vehicleOptions);
+  }, [vehicleOptions]);
+
   const [pickup, setPickup] = useState("");
   const [pickupSuggestions, setPickupSuggestions] = useState<any[]>([]);
   const [destSuggestions, setDestSuggestions]     = useState<any[]>([]);
@@ -57,6 +64,12 @@ export default function BookingScreen() {
   const [destinationCoords, setDestinationCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<{ latitude: number; longitude: number }[]>([]);
   const [mapRegion, setMapRegion] = useState(DEFAULT_REGION);
+
+  // Log whenever coordinates change
+  useEffect(() => {
+    console.log('[BookingScreen] pickupCoords:', pickupCoords);
+    console.log('[BookingScreen] destinationCoords:', destinationCoords);
+  }, [pickupCoords, destinationCoords]);
 
   const appliedPromo = params.promoCode as string;
 
@@ -116,6 +129,7 @@ export default function BookingScreen() {
       
       console.log('[selectPickup] Got coords:', coords);
       setPickupCoords(coords);
+      console.log('[selectPickup] setPickupCoords called with:', coords);
 
       const nextRegion = {
         latitude: coords.latitude,
@@ -200,6 +214,7 @@ export default function BookingScreen() {
       
       console.log('[selectDestination] Got coords:', coords);
       setDestinationCoords(coords);
+      console.log('[selectDestination] setDestinationCoords called with:', coords);
 
       const nextRegion = pickupCoords
         ? {
@@ -632,25 +647,61 @@ export default function BookingScreen() {
         token = await SecureStore.getItemAsync('access_token');
       }
 
+      // API requires coordinates, not addresses
+      if (!pickupCoords || !destinationCoords) {
+        console.warn('[fetchPricing] Missing coordinates, skipping API call');
+        setVehicleOptions([]);
+        return;
+      }
+
       const response = await fetch('https://admin.datxedulich.vip/api/customer/drivers/nearby', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify({ pickup_location: pickup, destination_location: dest }),
+        body: JSON.stringify({ 
+          pickup_lat: pickupCoords.latitude,
+          pickup_lng: pickupCoords.longitude,
+          dropoff_lat: destinationCoords.latitude,
+          dropoff_lng: destinationCoords.longitude,
+        }),
       });
       const data = await response.json();
       
-      // Giả định response trả về danh sách xe hoặc đối tượng chứa danh sách xe
-      const vehicles = data.vehicles || data.data || data; 
+      console.log('[fetchPricing] API Response:', data);
       
-      if (response.ok && Array.isArray(vehicles)) {
-        setVehicleOptions(vehicles);
-        if (vehicles.length > 0) setSelectedType(vehicles[0].id);
+      // Map API response format to expected format
+      const apiVehicles = data.vehicles || data.data || data;
+      
+      if (response.ok && Array.isArray(apiVehicles) && apiVehicles.length > 0) {
+        // Map API fields to expected format
+        const mappedVehicles = apiVehicles.map((v: any) => ({
+          id: v.vehicle_type_id?.toString() || v.id?.toString(),
+          name: v.name,
+          price: v.final_price || v.price || v.estimated_price,
+          description: v.description,
+          is_available: v.is_available,
+          eta_minutes: v.eta_minutes,
+          icon_url: v.icon_url,
+        })).filter((v: any) => v.is_available !== false); // Filter out unavailable vehicles
+        
+        console.log('[fetchPricing] Mapped vehicles:', mappedVehicles);
+        
+        if (mappedVehicles.length > 0) {
+          setVehicleOptions(mappedVehicles);
+          setSelectedType(mappedVehicles[0].id);
+        } else {
+          console.warn('[fetchPricing] No available vehicles after filtering');
+          setVehicleOptions([]);
+        }
+      } else {
+        console.warn('[fetchPricing] API không trả về xe, response:', response.status, 'data:', data);
+        setVehicleOptions([]);
       }
     } catch (error) {
-      console.error('Fetch Pricing Error:', error);
+      console.error('[fetchPricing] API Error:', error);
+      setVehicleOptions([]);
     } finally {
       setPricingLoading(false);
     }
@@ -953,17 +1004,11 @@ export default function BookingScreen() {
           <View style={styles.dragHandle} />
         </View>
         
-        <View style={styles.sheetTitleArea}>
-          <Text style={styles.sheetTitleText}>Dịch vụ xe 16 chỗ</Text>
-          <View style={styles.serviceBadge}>
-            <Text style={styles.serviceBadgeText}>2 sẵn có</Text>
-          </View>
-        </View>
-        
         <ScrollView style={styles.carScrollList} showsVerticalScrollIndicator={false}>
           {vehicleOptions && vehicleOptions.length > 0 ? (
             vehicleOptions.map((type, index) => {
               const isActive = selectedType === type.id;
+              console.log('[VehicleCard] Rendering:', type.name, 'Active:', isActive);
               return (
                 <TouchableOpacity
                   key={type.id || index}
@@ -987,31 +1032,12 @@ export default function BookingScreen() {
           ) : (
             <View style={{ padding: 20, alignItems: 'center' }}>
               <Text style={{ color: '#757575' }}>Không có xe nào khả dụng</Text>
+              <Text style={{ color: '#9E9E9E', fontSize: 12, marginTop: 4 }}>vehicleOptions: {JSON.stringify(vehicleOptions)}</Text>
             </View>
           )}
         </ScrollView>
 
         <View style={styles.bottomFooter}>
-          <View style={styles.quickOptions}>
-            <TouchableOpacity style={styles.methodBtn}>
-              <View style={styles.cashIcon}>
-                <Text style={styles.cashIconText}>$</Text>
-              </View>
-              <Text style={styles.methodLabel}>Tiền mặt</Text>
-              <ChevronRight size={14} color="#9E9E9E" />
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={[styles.promoBtn, appliedPromo && styles.promoBtnActive]}
-              onPress={() => router.push('/(tabs)/explore')}
-            >
-              <Ticket size={18} color={appliedPromo ? COLORS.primary : "#757575"} />
-              <Text style={[styles.promoLabel, appliedPromo && styles.promoLabelActive]}>
-                {appliedPromo ? appliedPromo : 'Ưu đãi'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
           <TouchableOpacity 
             style={[styles.confirmBtn, loading && styles.disabledBtn]}
             onPress={handleConfirmRide}
@@ -1059,7 +1085,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(255,255,255,0.95)',
+    // backgroundColor: 'rgba(255,255,255,0.95)',
     borderBottomLeftRadius: 25,
     borderBottomRightRadius: 25,
     ...SHADOW.md,
@@ -1068,15 +1094,15 @@ const styles = StyleSheet.create({
     overflow: 'visible',
   },
   safeArea: {
-    paddingBottom: 20,
+    paddingBottom: Platform.OS === 'ios' ? 20 : 10,
   },
   headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    height: 50,
-    marginTop: Platform.OS === 'android' ? 35 : 0,
+    height: Platform.OS === 'ios' ? 50 : 44,
+    marginTop: Platform.OS === 'android' ? 30 : 0,
   },
   backAction: {
     padding: 4,
@@ -1092,14 +1118,19 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 10,
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-    borderRadius: 18,
+    paddingTop: 18,
+    paddingBottom: 12,
+    borderRadius: 20,
     flexDirection: 'row',
     borderWidth: 1,
-    borderColor: '#F0F0F0',
+    borderColor: '#E8E8E8',
     overflow: 'visible',
     zIndex: 200,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
   pathIconBox: {
     alignItems: 'center',
@@ -1182,7 +1213,7 @@ const styles = StyleSheet.create({
   },
   fieldMain: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 16,
     color: COLORS.text,
     fontWeight: '600',
     padding: 0,
@@ -1237,16 +1268,17 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: COLORS.white,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+    backgroundColor: "#000",
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    paddingBottom: Platform.OS === 'android' ? 15 : 4,
+    maxHeight: Platform.OS === 'android' ? '350' : '400',
     ...SHADOW.lg,
     shadowOpacity: 0.2,
     zIndex: 100,
   },
   dragHandleBox: {
-    height: 24,
+    height: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1259,58 +1291,68 @@ const styles = StyleSheet.create({
   sheetTitleArea: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 16,
+    paddingHorizontal: 16,
+    marginBottom: 6,
   },
   sheetTitleText: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: '600',
     color: COLORS.text,
   },
   serviceBadge: {
     backgroundColor: COLORS.surface,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-    marginLeft: 10,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    borderRadius: 3,
+    marginLeft: 6,
   },
   serviceBadgeText: {
-    fontSize: 11,
+    fontSize: 8,
     color: COLORS.textSecondary,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   carScrollList: {
-    maxHeight: 220,
+    maxHeight: Platform.OS === 'ios' ? 100 : 70,
     paddingHorizontal: 16,
   },
   carCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
-    borderRadius: 16,
+    padding: Platform.OS === 'ios' ? 6 : 4,
+    borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#F5F5F5',
-    marginBottom: 10,
+    borderColor: '#F0F0F0',
+    marginBottom: Platform.OS === 'ios' ? 4 : 2,
     backgroundColor: COLORS.white,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.02,
+    shadowRadius: 1,
+    elevation: 1,
   },
   carCardActive: {
     borderColor: COLORS.primary,
-    backgroundColor: COLORS.primary + '05',
+    backgroundColor: COLORS.primary + '08',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
   },
   carIconBox: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 6,
     backgroundColor: '#F8F8F8',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 15,
+    marginRight: 8,
   },
   carIconBoxActive: {
     backgroundColor: COLORS.primary + '15',
   },
   carEmojiText: {
-    fontSize: 26,
+    fontSize: 16,
   },
   carDetails: {
     flex: 1,
@@ -1319,59 +1361,59 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 2,
+    marginBottom: 0,
   },
   carNameText: {
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
     color: COLORS.text,
   },
   carPriceText: {
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: '700',
     color: COLORS.text,
   },
   carDescText: {
-    fontSize: 12,
+    fontSize: 9,
     color: '#757575',
     fontWeight: '500',
   },
   bottomFooter: {
-    paddingHorizontal: 20,
-    marginTop: 15,
+    paddingHorizontal: 16,
+    marginTop: 4,
   },
   quickOptions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 6,
   },
   methodBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F8F8F8',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
     flex: 1,
     marginRight: 8,
   },
   cashIcon: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
+    marginRight: 6,
   },
   cashIconText: {
     color: COLORS.white,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
   },
   methodLabel: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
     color: COLORS.text,
     flex: 1,
   },
@@ -1379,10 +1421,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F8F8F8',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-    minWidth: 110,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    minWidth: 90,
   },
   promoBtnActive: {
     backgroundColor: COLORS.primary + '10',
@@ -1390,8 +1432,8 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary + '30',
   },
   promoLabel: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
     color: '#757575',
     marginLeft: 6,
   },
@@ -1400,19 +1442,23 @@ const styles = StyleSheet.create({
   },
   confirmBtn: {
     backgroundColor: COLORS.primary,
-    height: 56,
-    borderRadius: 16,
+    height: 38,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    ...SHADOW.md,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   disabledBtn: {
     opacity: 0.7,
   },
   confirmBtnText: {
     color: COLORS.white,
-    fontSize: 17,
-    fontWeight: '800',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
 
