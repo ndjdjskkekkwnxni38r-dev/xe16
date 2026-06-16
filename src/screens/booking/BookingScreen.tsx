@@ -3,6 +3,7 @@ import { useToast } from '@/components/Toast';
 import { POPULAR_DESTINATIONS, type PlaceSuggestion } from '@/constants/data';
 import { COLORS, SHADOW } from '@/constants/theme';
 import { geocodeAddressFallback, getPlaceDetails, searchAddressSuggestions } from '@/services/addressSearch';
+import socketService from '@/services/socket';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -12,7 +13,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
+  Image,
   Keyboard,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -46,6 +49,94 @@ export default function BookingScreen() {
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [destination, setDestination] = useState((params.destination as string) || '');
   const [vehicleOptions, setVehicleOptions] = useState<any[] | null>(null);
+
+  // --- Payments and Promotions State ---
+  const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+  const [selectedPayment, setSelectedPayment] = useState<any>(null);
+  const [promotions, setPromotions] = useState<any[]>([]);
+  const [selectedPromo, setSelectedPromo] = useState<any>(null);
+  const [isPaymentModalVisible, setIsPaymentModalVisible] = useState(false);
+  const [isPromoModalVisible, setIsPromoModalVisible] = useState(false);
+
+  // Hàm tính giá sau khi áp dụng mã giảm giá
+  const getFinalPrice = (basePrice: number) => {
+    if (!selectedPromo) return basePrice;
+    
+    // Giả sử promo.value là số tiền giảm hoặc %
+    // Bạn cần điều chỉnh logic này dựa trên cấu trúc API thật của bạn
+    const discountValue = parseFloat(selectedPromo.value || 0);
+    if (selectedPromo.type === 'percentage') {
+      return basePrice * (1 - discountValue / 100);
+    } else {
+      return Math.max(0, basePrice - discountValue);
+    }
+  };
+
+  // Tính giá của xe đang chọn
+  const activeVehicle = vehicleOptions?.find(v => v.id === selectedType);
+  const finalDisplayPrice = activeVehicle ? getFinalPrice(activeVehicle.price) : 0;
+
+  const fetchPaymentsAndPromos = async () => {
+    try {
+      let token = null;
+      if (Platform.OS === 'web') {
+        token = localStorage.getItem('access_token');
+      } else {
+        token = await SecureStore.getItemAsync('access_token');
+      }
+
+      // Fetch Payment Methods
+      const payRes = await fetch('https://admin.datxedulich.vip/api/customer/payments', {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json'
+        }
+      });
+      const payText = await payRes.text();
+      
+      try {
+        const payData = JSON.parse(payText);
+        if (payRes.ok && payData.data) {
+          setPaymentMethods(payData.data);
+          if (payData.data.length > 0) setSelectedPayment(payData.data[0]);
+        } else {
+          console.warn('[BookingScreen] Payments API returned error:', payData);
+        }
+      } catch (e) {
+        console.error('[BookingScreen] Payments Raw Response (Non-JSON):', payText.substring(0, 200));
+      }
+
+      // Fetch Applicable Promotions
+      const promoRes = await fetch('https://admin.datxedulich.vip/api/customer/promotions/applicable', {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({}) // Thêm body rỗng cho POST
+      });
+      const promoText = await promoRes.text();
+      console.log('[BookingScreen] Promotions Response Status:', promoRes.status);
+
+      try {
+        const promoData = JSON.parse(promoText);
+        if (promoRes.ok && promoData.data) {
+          setPromotions(promoData.data);
+        } else {
+          console.warn('[BookingScreen] Promotions API error:', promoRes.status, promoData);
+        }
+      } catch (e) {
+        console.error('[BookingScreen] Failed to parse promotions JSON:', e);
+      }
+    } catch (error) {
+      console.error('[BookingScreen] Error fetching payments/promos:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchPaymentsAndPromos();
+  }, []);
 
   console.log('[BookingScreen] Initial vehicleOptions:', vehicleOptions);
 
@@ -486,6 +577,7 @@ export default function BookingScreen() {
         pickup_lng: pickupCoords.longitude,
         dropoff_lat: destinationCoords.latitude,
         dropoff_lng: destinationCoords.longitude,
+        promo_code: selectedPromo?.code || null,
       };
       console.log('[fetchPricing] Sending Body:', body);
 
@@ -543,11 +635,12 @@ export default function BookingScreen() {
     }
   };
 
-  // Gọi API lấy giá khi destinationCoords hoặc pickupCoords thay đổi
+  // Gọi API lấy giá khi destinationCoords, pickupCoords hoặc selectedPromo thay đổi
   useEffect(() => {
     console.log('[DEBUG] useEffect triggered. State check:');
     console.log(' - destinationCoords:', destinationCoords);
     console.log(' - pickupCoords:', pickupCoords);
+    console.log(' - selectedPromo:', selectedPromo);
     
     if (destinationCoords && pickupCoords) {
       console.log('[DEBUG] Both coords present, calling fetchPricing.');
@@ -555,7 +648,14 @@ export default function BookingScreen() {
     } else {
       console.log('[DEBUG] Missing coords, skipping fetchPricing.');
     }
-  }, [destinationCoords, pickupCoords]);
+  }, [destinationCoords, pickupCoords, selectedPromo]);
+
+  // Dọn dẹp socket khi component unmount
+  useEffect(() => {
+    return () => {
+      socketService.disconnect();
+    };
+  }, []);
 
   const handleConfirmRide = async () => {
     console.log('[handleConfirmRide] Starting...');
@@ -603,12 +703,12 @@ export default function BookingScreen() {
 
       const bodyData = {
         pickup_address: pickup,
-        dropoff_address: destination, // Changed from destination_address
+        dropoff_address: destination,
         vehicle_type_id: selectedType,
         quote_id: selectedVan.quote_id,
-        total_price: selectedVan.price,
-        promo_code: appliedPromo || null,
-        payment_method: 'cash',
+        total_price: getFinalPrice(selectedVan.price),
+        promo_code: selectedPromo?.code || appliedPromo || null,
+        payment_method: selectedPayment?.code || 'cash',
       };
       console.log('[handleConfirmRide] Sending Booking Body:', bodyData);
 
@@ -626,8 +726,41 @@ export default function BookingScreen() {
       console.log('[handleConfirmRide] Booking API Response:', response.status, data);
 
       if (response.ok) {
-        showToast({ message: 'Đặt xe thành công! Tài xế đang đến.', type: 'success' });
-        setTimeout(() => router.replace('/history'), 1500);
+        console.log('[handleConfirmRide] SUCCESS response data:', JSON.stringify(data, null, 2));
+
+        // Attempt to find booking ID in every possible field mentioned or common in Laravel
+        const bookingId = 
+          data.data?.id || 
+          data.id || 
+          data.booking_id || 
+          data.data?.booking_id ||
+          data.booking?.id ||
+          data.data?.booking?.id ||
+          (typeof data.data === 'number' ? data.data : null) ||
+          (typeof data.id === 'number' ? data.id : null);
+        
+        console.log('[handleConfirmRide] Final extracted bookingId:', bookingId);
+        
+        if (bookingId) {
+          showToast({ message: 'Đang tìm tài xế cho bạn...', type: 'success' });
+          
+          // Use absolute path for reliable redirection
+          const targetPath = `/activity/tracking/${bookingId}`;
+          console.log('[handleConfirmRide] Redirecting to:', targetPath);
+          
+          // Small delay to let the toast show and ensure state is stable
+          setTimeout(() => {
+            router.replace(targetPath as any);
+          }, 500);
+        } else {
+          // If we reach here, it means response was 200 OK but we couldn't find an ID
+          console.error('[handleConfirmRide] SUCCESS but NO ID. Response:', data);
+          showToast({ 
+            message: 'Đặt xe thành công! Không tìm thấy mã đơn, đang chuyển đến lịch sử.', 
+            type: 'info' 
+          });
+          setTimeout(() => router.replace('/history'), 2000);
+        }
       } else {
         showToast({ message: data.message || 'Đặt xe thất bại', type: 'error' });
       }
@@ -648,6 +781,8 @@ export default function BookingScreen() {
           provider={Platform.OS !== 'web' ? PROVIDER_GOOGLE : undefined}
           region={mapRegion}
           showsUserLocation
+          scrollEnabled={!destFocused}
+          zoomEnabled={!destFocused}
         >
           {pickupCoords && (
             <Marker coordinate={pickupCoords} />
@@ -663,6 +798,9 @@ export default function BookingScreen() {
             />
           )}
         </MapView>
+        {destFocused && (
+          <View style={[StyleSheet.absoluteFill, { zIndex: 500, backgroundColor: 'transparent' }]} />
+        )}
       </View>
       {/* Modern Integrated Header */}
       <View style={styles.topHeaderArea}>
@@ -765,7 +903,7 @@ export default function BookingScreen() {
               <View style={styles.thinDivider} />
 
               {/* ---- ĐẾN ĐÂU? ---- */}
-              <View style={[styles.inputRow, destFocused && styles.inputRowFocused]}>
+              <View style={[styles.inputRow, destFocused && styles.inputRowFocused, { zIndex: 9999, overflow: 'visible' }]}>
                 <Text style={styles.labelSmall}>ĐẾN ĐÂU?</Text>
                 <View style={styles.searchRow}>
                   <TextInput
@@ -791,141 +929,346 @@ export default function BookingScreen() {
                       <X size={16} color="#757575" />
                     </TouchableOpacity>
                   ) : (
-                    <Search size={18} color={COLORS.primary} strokeWidth={2.5} />
+                    <TouchableOpacity onPress={() => setDestFocused(true)} style={styles.clearBtn}>
+                      <Search size={18} color={COLORS.primary} strokeWidth={2.5} />
+                    </TouchableOpacity>
                   )}
                 </View>
 
                 {destFocused && (
-                  <View style={styles.suggestionBox}>
-                    <ScrollView
-                      style={styles.suggestionScroll}
-                      nestedScrollEnabled
-                      keyboardShouldPersistTaps="handled"
-                      showsVerticalScrollIndicator={false}
+                  <Modal
+                    visible={true}
+                    transparent={true}
+                    animationType="none"
+                    onRequestClose={() => setDestFocused(false)}
+                  >
+                    <TouchableOpacity 
+                      style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} 
+                      activeOpacity={1} 
+                      onPress={() => setDestFocused(false)}
                     >
-                      {!destination ? (
-                        <>
-                          <Text style={styles.suggestionHeader}>ĐIỂM ĐẾN PHỔ BIẾN</Text>
-                          {POPULAR_DESTINATIONS.map((item) => renderDestSuggestionItem(item, 'star'))}
-                        </>
-                      ) : (
-                        <>
-                          <TouchableOpacity
-                            style={styles.suggestionItem}
-                            onPress={() => selectDestination(destination)}
-                          >
-                            <Ionicons name="pin-outline" size={14} color={COLORS.primary} style={{ marginRight: 8 }} />
-                            <View style={{ flex: 1 }}>
-                              <Text style={styles.suggestionMain} numberOfLines={1}>
-                                Sử dụng địa chỉ đã nhập
-                              </Text>
-                              <Text style={styles.suggestionSub} numberOfLines={1}>
-                                {destination}
-                              </Text>
-                            </View>
-                          </TouchableOpacity>
-
-                          {matchingPopular.length > 0 && (
+                      <View style={[styles.suggestionBox, { top: 180, marginHorizontal: 16, height: 300, zIndex: 99999, elevation: 99999 }]}>
+                        <ScrollView
+                          style={{ flex: 1 }}
+                          contentContainerStyle={{ flexGrow: 1, paddingBottom: 20 }}
+                          nestedScrollEnabled={true}
+                          keyboardShouldPersistTaps="always"
+                          showsVerticalScrollIndicator={true}
+                          scrollEnabled={true}
+                        >
+                          {!destination ? (
                             <>
-                              <Text style={styles.suggestionHeader}>GỢI Ý PHÙ HỢP</Text>
-                              {matchingPopular.map((item) => renderDestSuggestionItem(item, 'star'))}
+                              <Text style={styles.suggestionHeader}>ĐIỂM ĐẾN PHỔ BIẾN</Text>
+                              {POPULAR_DESTINATIONS.map((item) => renderDestSuggestionItem(item, 'star'))}
+                            </>
+                          ) : (
+                            <>
+                              <TouchableOpacity
+                                style={styles.suggestionItem}
+                                onPress={() => selectDestination(destination)}
+                              >
+                                <Ionicons name="pin-outline" size={14} color={COLORS.primary} style={{ marginRight: 8 }} />
+                                <View style={{ flex: 1 }}>
+                                  <Text style={styles.suggestionMain} numberOfLines={1}>
+                                    Sử dụng địa chỉ đã nhập
+                                  </Text>
+                                  <Text style={styles.suggestionSub} numberOfLines={1}>
+                                    {destination}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+
+                              {matchingPopular.length > 0 && (
+                                <>
+                                  <Text style={styles.suggestionHeader}>GỢI Ý PHÙ HỢP</Text>
+                                  {matchingPopular.map((item) => renderDestSuggestionItem(item, 'star'))}
+                                </>
+                              )}
+
+                              {destSuggestionsLoading && (
+                                <View style={styles.suggestionLoading}>
+                                  <ActivityIndicator size="small" color={COLORS.primary} />
+                                  <Text style={styles.suggestionLoadingText}>Đang tìm địa chỉ...</Text>
+                                </View>
+                              )}
+
+                              {destSuggestions.length > 0 && (
+                                <>
+                                  <Text style={styles.suggestionHeader}>ĐỊA CHỈ TÌM KIẾM</Text>
+                                  {destSuggestions.map((item) => renderDestSuggestionItem(item, 'location'))}
+                                </>
+                              )}
+
+                              {!destSuggestionsLoading &&
+                                destSuggestions.length === 0 &&
+                                destination.trim().length >= 2 && (
+                                  <Text style={styles.suggestionEmpty}>
+                                    Không tìm thấy gợi ý — bạn có thể dùng địa chỉ đã nhập ở trên
+                                  </Text>
+                                )}
                             </>
                           )}
-
-                          {destSuggestionsLoading && (
-                            <View style={styles.suggestionLoading}>
-                              <ActivityIndicator size="small" color={COLORS.primary} />
-                              <Text style={styles.suggestionLoadingText}>Đang tìm địa chỉ...</Text>
-                            </View>
-                          )}
-
-                          {destSuggestions.length > 0 && (
-                            <>
-                              <Text style={styles.suggestionHeader}>ĐỊA CHỈ TÌM KIẾM</Text>
-                              {destSuggestions.map((item) => renderDestSuggestionItem(item, 'location'))}
-                            </>
-                          )}
-
-                          {!destSuggestionsLoading &&
-                            destSuggestions.length === 0 &&
-                            destination.trim().length >= 2 && (
-                              <Text style={styles.suggestionEmpty}>
-                                Không tìm thấy gợi ý — bạn có thể dùng địa chỉ đã nhập ở trên
-                              </Text>
-                            )}
-                        </>
-                      )}
-                    </ScrollView>
-                  </View>
+                        </ScrollView>
+                      </View>
+                    </TouchableOpacity>
+                  </Modal>
                 )}
               </View>
-            </View>
-          </View>
-        </SafeAreaView>
-      </View>
 
-      <View style={styles.bottomSheet}>
+            </View>
+            </View>
+            </SafeAreaView>
+            </View>
+
+            <View style={styles.bottomSheet}>
         <View style={styles.dragHandleBox}>
           <View style={styles.dragHandle} />
         </View>
         
-        <ScrollView style={styles.carScrollList} showsVerticalScrollIndicator={false}>
+        <ScrollView 
+          style={styles.carScrollList} 
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 20 }}
+        >
           {vehicleOptions && vehicleOptions.length > 0 ? (
             vehicleOptions.map((type, index) => {
               const isActive = selectedType === type.id;
-              console.log('[VehicleCard] Rendering:', type.name, 'Active:', isActive);
+              
+              // Cải tiến logic URL: Chấp nhận mọi đường dẫn
+              const iconPath = type.icon_url;
+              let finalIconUrl = null;
+              
+              if (iconPath) {
+                if (iconPath.startsWith('http')) {
+                  finalIconUrl = iconPath;
+                } else {
+                  const clean = iconPath.replace(/^\//, '');
+                  finalIconUrl = `https://admin.datxedulich.vip/${clean}`;
+                }
+              }
+
               return (
                 <TouchableOpacity
                   key={type.id || index}
                   onPress={() => setSelectedType(type.id)}
-                  style={[styles.carCard, isActive && styles.carCardActive]}>
+                  style={[styles.vCard, isActive && styles.vCardActive]}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.vImageContainer}>
+                      {finalIconUrl ? (
+                        <Image 
+                          source={{ uri: finalIconUrl }} 
+                          style={styles.vImage} 
+                          resizeMode="contain" 
+                        />
+                      ) : (
+                        <View style={styles.vNoImageBox}>
+                          <Ionicons name="bus-outline" size={30} color={isActive ? COLORS.primary : "#94A3B8"} />
+                        </View>
+                      )}
+                  </View>
                   
-                  {/* Selection Indicator */}
-                  <View style={[styles.radioCircle, isActive && styles.radioCircleActive]}>
-                    {isActive && <View style={styles.radioInner} />}
-                  </View>
-
-                  {/* Vehicle Icon */}
-                  <View style={styles.carIconBox}>
-                    <Text style={styles.carEmojiText}>🚐</Text>
-                  </View>
-                  
-                  {/* Vehicle Info */}
-                  <View style={styles.carDetails}>
-                    <Text style={styles.carNameText}>{type.name || 'Xe 16 chỗ'}</Text>
-                    <Text style={styles.carDescText}>Đến nơi sau 5 phút</Text>
-                  </View>
-
-                  {/* Price */}
-                  <View style={styles.carPriceBox}>
-                    <Text style={styles.carPriceText}>
-                      {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(type.price || 0)}
+                  {/* Container info: Sử dụng flex: 1 để không bao giờ bị đẩy bởi cột giá */}
+                  <View style={styles.vInfoContainer}>
+                    <View style={styles.vNameRow}>
+                      <Text style={[styles.vNameText, isActive && styles.textPrimary]} numberOfLines={1}>
+                        {type.name || 'Loại xe'}
+                      </Text>
+                      {index === 0 && (
+                        <View style={styles.vBadge}>
+                          <Text style={styles.vBadgeText}>TỐT</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.vDescText} numberOfLines={1}>
+                        {type.description || 'Chỗ ngồi thoải mái'}
                     </Text>
+                    <View style={styles.vEtaRow}>
+                        <Ionicons name="time-outline" size={12} color={COLORS.primary} />
+                        <Text style={styles.vEtaText}>{type.eta_minutes || 5} phút</Text>
+                    </View>
+                  </View>
+
+                  {/* Giá tiền: Cố định width, không dùng flex */}
+                  <View style={styles.vPriceContainer}>
+                    <Text style={[styles.vPriceText, isActive && styles.textPrimary]}>
+                      {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(getFinalPrice(type.price || 0))}
+                    </Text>
+                    {selectedPromo && (
+                      <Text style={{ fontSize: 10, color: COLORS.primary, fontWeight: 'bold' }}>
+                        Đã giảm giá
+                      </Text>
+                    )}
+                    <View style={[styles.vRadio, isActive && styles.vRadioActive]} />
                   </View>
                 </TouchableOpacity>
               );
             })
           ) : (
-            <View style={{ padding: 20, alignItems: 'center' }}>
-              <Text style={{ color: '#757575' }}>{vehicleOptions === null ? 'Đang tìm xe...' : 'Không có xe nào khả dụng'}</Text>
+            <View style={styles.emptyCarState}>
+              <ActivityIndicator color={COLORS.primary} />
+              <Text style={styles.emptyCarText}>{vehicleOptions === null ? 'Đang tìm xe gần bạn...' : 'Không tìm thấy xe phù hợp'}</Text>
             </View>
           )}
         </ScrollView>
 
-        <View style={styles.bottomFooter}>
+        <View style={styles.bottomFooterPremium}>
+          <View style={styles.quickOptionsRow}>
+            <TouchableOpacity 
+              style={styles.paymentPill}
+              onPress={() => setIsPaymentModalVisible(true)}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.pillIconBox, { backgroundColor: '#FFF' }]}>
+                <Ionicons 
+                  name={selectedPayment?.code === 'wallet' ? 'wallet' : 'card'} 
+                  size={16} 
+                  color={COLORS.primary} 
+                />
+              </View>
+              <Text style={styles.pillLabel} numberOfLines={1}>
+                {selectedPayment?.name || 'Tiền mặt'}
+              </Text>
+              <Ionicons name="chevron-down" size={14} color="#666" />
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.promoPill, selectedPromo && styles.promoPillActive]}
+              onPress={() => setIsPromoModalVisible(true)}
+              activeOpacity={0.8}
+            >
+              <Ionicons 
+                name="gift" 
+                size={16} 
+                color={selectedPromo ? COLORS.white : COLORS.primary} 
+              />
+              <Text style={[styles.pillLabel, selectedPromo && styles.textWhite]} numberOfLines={1}>
+                {selectedPromo ? selectedPromo.code : 'Ưu đãi'}
+              </Text>
+              <View style={styles.promoDot} />
+            </TouchableOpacity>
+          </View>
+
           <TouchableOpacity 
-            style={[styles.confirmBtn, loading && styles.disabledBtn]}
+            style={[styles.confirmBtnPremium, loading && styles.disabledBtn]}
             onPress={handleConfirmRide}
             disabled={loading}
           >
             {loading ? (
               <ActivityIndicator color="#FFF" />
             ) : (
-              <Text style={styles.confirmBtnText}>Xác nhận đặt xe</Text>
+              <View style={styles.confirmBtnContent}>
+                <Text style={styles.confirmBtnTextPremium}>ĐẶT XE NGAY</Text>
+                <Ionicons name="arrow-forward" size={20} color="#FFF" style={{ marginLeft: 8 }} />
+              </View>
             )}
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Payment Selection Modal */}
+      <Modal
+        visible={isPaymentModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setIsPaymentModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Phương thức thanh toán</Text>
+              <TouchableOpacity onPress={() => setIsPaymentModalVisible(false)}>
+                <X size={24} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {paymentMethods.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.selectionItem, selectedPayment?.id === item.id && styles.selectionItemActive]}
+                  onPress={() => {
+                    setSelectedPayment(item);
+                    setIsPaymentModalVisible(false);
+                  }}
+                >
+                  <Ionicons 
+                    name={item.code === 'wallet' ? 'wallet-outline' : 'cash-outline'} 
+                    size={24} 
+                    color={selectedPayment?.id === item.id ? COLORS.primary : COLORS.text} 
+                  />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={[styles.selectionName, selectedPayment?.id === item.id && { color: COLORS.primary }]}>
+                      {item.name}
+                    </Text>
+                    <Text style={styles.selectionDesc}>{item.description || 'Thanh toán khi hoàn thành chuyến đi'}</Text>
+                  </View>
+                  {selectedPayment?.id === item.id && (
+                    <Ionicons name="checkmark-circle" size={24} color={COLORS.primary} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Promotion Selection Modal */}
+      <Modal
+        visible={isPromoModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setIsPromoModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Chọn mã giảm giá</Text>
+              <TouchableOpacity onPress={() => setIsPromoModalVisible(false)}>
+                <X size={24} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {promotions.length > 0 ? promotions.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.selectionItem, selectedPromo?.id === item.id && styles.selectionItemActive]}
+                  onPress={() => {
+                    setSelectedPromo(item);
+                    setIsPromoModalVisible(false);
+                  }}
+                >
+                  <View style={styles.promoIconBox}>
+                    <Ionicons name="ticket" size={24} color={COLORS.primary} />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.selectionName}>{item.name || item.code}</Text>
+                    <Text style={styles.selectionDesc}>{item.description || `Giảm giá cho chuyến đi của bạn`}</Text>
+                  </View>
+                  {selectedPromo?.id === item.id && (
+                    <Ionicons name="checkmark-circle" size={24} color={COLORS.primary} />
+                  )}
+                </TouchableOpacity>
+              )) : (
+                <View style={{ padding: 40, alignItems: 'center' }}>
+                  <Ionicons name="receipt-outline" size={48} color="#E0E0E0" />
+                  <Text style={{ marginTop: 10, color: '#9E9E9E' }}>Không có mã giảm giá khả dụng</Text>
+                </View>
+              )}
+              {selectedPromo && (
+                <TouchableOpacity 
+                  style={{ marginTop: 10, alignItems: 'center', padding: 10 }}
+                  onPress={() => {
+                    setSelectedPromo(null);
+                    setIsPromoModalVisible(false);
+                  }}
+                >
+                  <Text style={{ color: COLORS.error, fontWeight: '600' }}>Bỏ chọn mã giảm giá</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1101,7 +1444,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginTop: 6,
     marginBottom: 4,
-    zIndex: 999,
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    zIndex: 2000,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -1109,7 +1456,7 @@ const styles = StyleSheet.create({
     elevation: 10,
     borderWidth: 1,
     borderColor: '#EEEEEE',
-    overflow: 'hidden',
+    overflow: 'visible',
   },
   suggestionHeader: {
     fontSize: 10,
@@ -1188,178 +1535,261 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   carScrollList: {
-    maxHeight: 300,
+    flex: 1,
     paddingHorizontal: 16,
   },
-  carCard: {
+  // --- New Styles for Vehicle List ---
+  vCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: Platform.OS === 'ios' ? 6 : 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-    marginBottom: Platform.OS === 'ios' ? 4 : 2,
+    padding: 16,
+    borderRadius: 20,
     backgroundColor: COLORS.white,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.02,
-    shadowRadius: 1,
-    elevation: 1,
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: '#F5F5F5',
+    ...SHADOW.sm,
   },
-  carCardActive: {
+  vCardActive: {
     borderColor: COLORS.primary,
-    backgroundColor: COLORS.primary + '08',
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
+    backgroundColor: COLORS.primary + '05',
+    borderWidth: 2,
   },
-  carIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 6,
-    backgroundColor: '#F8F8F8',
+  vImageContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 16,
+    backgroundColor: '#F8F9FA',
+    justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 16,
+  },
+  vImage: {
+    width: '80%',
+    height: '80%',
+  },
+  vNoImageBox: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  vInfoContainer: {
+    flex: 1,
     justifyContent: 'center',
     marginRight: 8,
   },
-  carIconBoxActive: {
-    backgroundColor: COLORS.primary + '15',
-  },
-  carEmojiText: {
-    fontSize: 16,
-  },
-  radioCircle: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
-    marginRight: 10,
+  vNameRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    marginBottom: 4,
   },
-  radioCircleActive: {
-    borderColor: COLORS.primary,
+  vNameText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.text,
   },
-  radioInner: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.primary,
-  },
-  carDetails: {
-    flex: 1,
-  },
-  carPriceBox: {
+  vBadge: {
+    backgroundColor: '#FF3B30',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
     marginLeft: 8,
   },
-  carTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 0,
+  vBadgeText: {
+    color: COLORS.white,
+    fontSize: 8,
+    fontWeight: '900',
   },
-  carNameText: {
+  vDescText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  carPriceText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  carDescText: {
-    fontSize: 9,
-    color: '#757575',
-    fontWeight: '500',
-  },
-  bottomFooter: {
-    paddingHorizontal: 16,
-    marginTop: 4,
-    marginBottom: 20,
-    zIndex: 1000,
-    elevation: 10,
-  },
-  quickOptions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    color: '#6B7280',
     marginBottom: 6,
   },
-  methodBtn: {
+  vEtaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8F8F8',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-    flex: 1,
-    marginRight: 8,
   },
-  cashIcon: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+  vEtaText: {
+    fontSize: 11,
+    color: COLORS.primary,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  vPriceContainer: {
+    width: 90, // Cố định chiều rộng
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  vPriceText: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  vRadio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+  },
+  vRadioActive: {
+    borderColor: COLORS.primary,
     backgroundColor: COLORS.primary,
+  },
+  emptyCarState: {
+    padding: 60,
+    alignItems: 'center',
+  },
+  emptyCarText: {
+    marginTop: 16,
+    color: '#9CA3AF',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  bottomFooterPremium: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: Platform.OS === 'android' ? 30 : 10,
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    ...SHADOW.lg,
+    shadowOpacity: 0.1,
+  },
+  quickOptionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    gap: 12,
+  },
+  paymentPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    paddingLeft: 8,
+    paddingRight: 16,
+    paddingVertical: 8,
+    borderRadius: 100,
+    flex: 1.2,
+    height: 48,
+  },
+  promoPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    paddingHorizontal: 16,
+    borderRadius: 100,
+    flex: 1,
+    height: 48,
+    borderWidth: 1.5,
+    borderColor: '#F3F4F6',
+  },
+  promoPillActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  pillIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 6,
+    marginRight: 10,
+    backgroundColor: COLORS.white,
+    ...SHADOW.sm,
   },
-  cashIconText: {
-    color: COLORS.white,
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
-  methodLabel: {
-    fontSize: 12,
-    fontWeight: '600',
+  pillLabel: {
+    fontSize: 14,
+    fontWeight: '800',
     color: COLORS.text,
     flex: 1,
+    marginRight: 4,
   },
-  promoBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8F8F8',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-    minWidth: 90,
+  textWhite: {
+    color: COLORS.white,
   },
-  promoBtnActive: {
-    backgroundColor: COLORS.primary + '10',
-    borderWidth: 1,
-    borderColor: COLORS.primary + '30',
-  },
-  promoLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#757575',
-    marginLeft: 6,
-  },
-  promoLabelActive: {
-    color: COLORS.primary,
-  },
-  confirmBtn: {
+  confirmBtnPremium: {
     backgroundColor: COLORS.primary,
-    height: 38,
-    borderRadius: 8,
+    height: 60,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    ...SHADOW.lg,
     shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.3,
+  },
+  confirmBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  confirmBtnTextPremium: {
+    color: COLORS.white,
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 1.5,
   },
   disabledBtn: {
     opacity: 0.7,
   },
-  confirmBtnText: {
-    color: COLORS.white,
+  // --- Modal Selection Styles ---
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
+    padding: 28,
+    paddingBottom: Platform.OS === 'ios' ? 45 : 35,
+    maxHeight: height * 0.85,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: COLORS.text,
+    letterSpacing: -0.5,
+  },
+  selectionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    borderRadius: 24,
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#F9FAFB',
+    backgroundColor: '#F9FAFB',
+  },
+  selectionItemActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary + '08',
+  },
+  selectionName: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  selectionDesc: {
     fontSize: 14,
-    fontWeight: '700',
+    color: '#6B7280',
+    marginTop: 4,
+    lineHeight: 20,
+    fontWeight: '500',
+  },
+  promoIconBox: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: COLORS.primary + '12',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 

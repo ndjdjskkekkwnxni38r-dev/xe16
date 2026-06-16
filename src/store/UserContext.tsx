@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
 interface UserInfo {
+  id: string | number;
   name: string;
   phone: string;
   email?: string;
@@ -52,6 +53,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         const userData = data.data || data;
         
         setUser({
+          id: userData.id,
           name: userData.name || userData.full_name || userData.displayName || 'Khách',
           phone: userData.phone || '',
           email: userData.email,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -9,53 +9,165 @@ import {
   Image,
   Dimensions,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import MapView, { Marker } from '@/components/Map';
 import { COLORS, SPACING, BORDER_RADIUS, SHADOW } from '@/constants/theme';
+import socketService from '@/services/socket';
+import { useToast } from '@/components/Toast';
+import { useUser } from '@/store/UserContext';
 
 const { width, height } = Dimensions.get('window');
-
-// Mock data for tracking
-const TRACKING_DATA = {
-  driver: {
-    name: 'Nguyễn Văn Hùng',
-    rating: 4.9,
-    trips: 1250,
-    phone: '0901234567',
-    avatar: 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?q=80&w=1000&auto=format&fit=crop',
-    car: 'Toyota Alphard Luxury',
-    plate: '51G-123.45',
-  },
-  status: 'Đang di chuyển',
-  eta: '12 phút',
-  distance: '4.5 km',
-  location: {
-    latitude: 16.0611,
-    longitude: 108.2274,
-  },
-  destination: {
-    latitude: 16.075,
-    longitude: 108.235,
-    address: 'Sân bay Đà Nẵng',
-  },
-  pickup: {
-    latitude: 16.055,
-    longitude: 108.220,
-    address: '227 Nguyễn Văn Cừ, Quận 5',
-  }
-};
 
 export default function LiveTrackingScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
+  const { showToast } = useToast();
+  const { user } = useUser();
+  
+  const [driver, setDriver] = useState<any>(null);
+  const [bookingData, setBookingData] = useState<any>(null);
+  const [tripStatus, setTripStatus] = useState('finding_driver');
+  const [eta, setEta] = useState('--');
+  const [distance, setDistance] = useState('--');
+  const [loading, setLoading] = useState(true);
+  
   const [region, setRegion] = useState({
     latitude: 16.0611,
     longitude: 108.2274,
-    latitudeDelta: 0.02,
-    longitudeDelta: 0.02,
+    latitudeDelta: 0.05,
+    longitudeDelta: 0.05,
   });
+
+  const fetchBookingDetails = async () => {
+    try {
+      let token = null;
+      if (Platform.OS === 'web') {
+        token = localStorage.getItem('access_token');
+      } else {
+        token = await SecureStore.getItemAsync('access_token');
+      }
+
+      const response = await fetch(`https://admin.datxedulich.vip/api/customer/bookings/${id}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+        },
+      });
+      const resData = await response.json();
+      console.log('[LiveTracking] Fetch Booking Data:', resData);
+
+      if (response.ok && resData.data) {
+        const b = resData.data;
+        setBookingData(b);
+        console.log('[LiveTracking] Booking status:', b.status);
+        
+        // Cập nhật trạng thái từ API
+        if (['accepted', 'driving', 'driver_found', 'arrived'].includes(b.status)) {
+          setTripStatus(b.status === 'driver_found' ? 'accepted' : b.status);
+          
+          if (b.driver) {
+            // Mapping chi tiết thông tin tài xế từ API Laravel
+            setDriver({
+              id: b.driver.id,
+              name: b.driver.full_name || b.driver.name || 'Tài xế',
+              avatar: b.driver.avatar_url || b.driver.photo_url || b.driver.avatar,
+              phone: b.driver.phone || b.driver.phone_number,
+              rating: b.driver.rating || '5.0',
+              trips: b.driver.trips_count || b.driver.total_trips || '0',
+              plate: b.driver.vehicle_plate || b.driver.plate_number || b.driver.plate || '---',
+              car: b.driver.vehicle_name || b.driver.car_model || b.driver.car || 'Đang cập nhật',
+              lat: b.driver.latitude || b.driver.lat,
+              lng: b.driver.longitude || b.driver.lng,
+            });
+          }
+        } else {
+          setTripStatus('finding_driver');
+        }
+
+        // Update map region if coordinates exist
+        if (b.pickup_lat && b.pickup_lng) {
+          setRegion(prev => ({
+            ...prev,
+            latitude: parseFloat(b.pickup_lat),
+            longitude: parseFloat(b.pickup_lng),
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('[LiveTracking] Fetch Details Error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (id) {
+      fetchBookingDetails();
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (!id || !user?.id) return;
+
+    const socket = socketService.connect();
+    
+    const channelName = `private-customer.${user.id}`;
+    socket.emit('subscribe', { channel: channelName });
+    console.log('[LiveTracking] Subscribed to channel:', channelName);
+
+    const eventName = `laravel_database_${channelName}:booking-accept`;
+    const eventVariations = [
+      eventName,
+      `laravel_database_${channelName}:booking_accepted`,
+      `${channelName}:booking-accept`,
+      'booking_accepted',
+      'booking-accept'
+    ];
+
+    eventVariations.forEach(ev => {
+      socket.on(ev, (data) => {
+        console.log(`[LiveTracking] Event Received (${ev}):`, data);
+        const driverData = data.driver || data.data?.driver || data;
+        if (driverData) {
+          setDriver(driverData);
+          setTripStatus('accepted');
+          showToast({ message: 'Tài xế đã chấp nhận chuyến đi!', type: 'success' });
+        }
+      });
+    });
+
+    socket.on('booking_updated', (data) => {
+      console.log('[LiveTracking] Booking Updated:', data);
+      if (data.status === 'accepted' || data.status === 'driving' || data.status === 'driver_found') {
+        setTripStatus(data.status);
+      }
+      if (data.driver) {
+        setDriver(data.driver);
+      }
+      if (data.eta) setEta(data.eta);
+      if (data.distance) setDistance(data.distance);
+    });
+
+    return () => {
+      eventVariations.forEach(ev => socket.off(ev));
+      socket.off('booking_updated');
+    };
+  }, [id, user?.id]);
+
+  const getStatusText = () => {
+    switch (tripStatus) {
+      case 'finding_driver': return 'Đang tìm tài xế...';
+      case 'accepted': return 'Tài xế đang đến';
+      case 'arrived': return 'Tài xế đã đến';
+      case 'driving': return 'Đang trong chuyến đi';
+      case 'completed': return 'Chuyến đi đã hoàn thành';
+      default: return 'Đang cập nhật';
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -66,29 +178,35 @@ export default function LiveTrackingScreen() {
         {Platform.OS !== 'web' ? (
           <MapView
             style={styles.map}
-            initialRegion={region}
+            region={region}
             showsUserLocation
           >
             {/* Pickup Marker */}
-            <Marker coordinate={TRACKING_DATA.pickup}>
-              <View style={[styles.markerContainer, { backgroundColor: COLORS.primary }]}>
-                <Ionicons name="location" size={18} color={COLORS.white} />
-              </View>
-            </Marker>
+            {bookingData?.pickup_lat && (
+              <Marker coordinate={{ latitude: parseFloat(bookingData.pickup_lat), longitude: parseFloat(bookingData.pickup_lng) }}>
+                <View style={[styles.markerContainer, { backgroundColor: COLORS.primary }]}>
+                  <Ionicons name="location" size={18} color={COLORS.white} />
+                </View>
+              </Marker>
+            )}
 
             {/* Destination Marker */}
-            <Marker coordinate={TRACKING_DATA.destination}>
-              <View style={[styles.markerContainer, { backgroundColor: COLORS.accent }]}>
-                <Ionicons name="flag" size={18} color={COLORS.white} />
-              </View>
-            </Marker>
+            {bookingData?.dropoff_lat && (
+              <Marker coordinate={{ latitude: parseFloat(bookingData.dropoff_lat), longitude: parseFloat(bookingData.dropoff_lng) }}>
+                <View style={[styles.markerContainer, { backgroundColor: COLORS.accent }]}>
+                  <Ionicons name="flag" size={18} color={COLORS.white} />
+                </View>
+              </Marker>
+            )}
 
-            {/* Car Marker (Current Location) */}
-            <Marker coordinate={TRACKING_DATA.location} rotation={90}>
-              <View style={styles.carMarker}>
-                <Ionicons name="car" size={24} color={COLORS.primary} />
-              </View>
-            </Marker>
+            {/* Driver Marker */}
+            {driver && driver.lat && (
+              <Marker coordinate={{ latitude: parseFloat(driver.lat), longitude: parseFloat(driver.lng) }} rotation={90}>
+                <View style={styles.carMarker}>
+                  <Ionicons name="car" size={24} color={COLORS.primary} />
+                </View>
+              </Marker>
+            )}
           </MapView>
         ) : (
           <View style={styles.webMapPlaceholder}>
@@ -109,8 +227,12 @@ export default function LiveTrackingScreen() {
             <Ionicons name="chevron-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
           <View style={styles.statusCard}>
-            <View style={styles.statusDot} />
-            <Text style={styles.statusText}>{TRACKING_DATA.status}</Text>
+            {tripStatus === 'finding_driver' ? (
+              <ActivityIndicator size="small" color={COLORS.primary} style={{ marginRight: 8 }} />
+            ) : (
+              <View style={styles.statusDot} />
+            )}
+            <Text style={styles.statusText}>{getStatusText()}</Text>
           </View>
           <TouchableOpacity style={styles.moreButton}>
             <Ionicons name="shield-checkmark" size={20} color={COLORS.primary} />
@@ -123,52 +245,79 @@ export default function LiveTrackingScreen() {
         {/* Progress Bar Area */}
         <View style={styles.progressContainer}>
           <View style={styles.etaBox}>
-            <Text style={styles.etaTime}>{TRACKING_DATA.eta}</Text>
+            <Text style={styles.etaTime}>{eta}</Text>
             <Text style={styles.etaLabel}>đến nơi</Text>
           </View>
           <View style={styles.progressTrack}>
-            <View style={styles.progressBar} />
+            <View style={[styles.progressBar, { width: driver ? '65%' : '0%' }]} />
           </View>
           <View style={styles.distanceBox}>
-            <Text style={styles.distanceValue}>{TRACKING_DATA.distance}</Text>
+            <Text style={styles.distanceValue}>{distance}</Text>
             <Text style={styles.distanceLabel}>còn lại</Text>
           </View>
         </View>
 
         {/* Driver Card */}
-        <View style={styles.driverCard}>
-          <View style={styles.driverInfo}>
-            <Image 
-              source={{ uri: TRACKING_DATA.driver.avatar }} 
-              style={styles.avatar} 
-            />
-            <View style={styles.driverDetails}>
-              <Text style={styles.driverName}>{TRACKING_DATA.driver.name}</Text>
-              <View style={styles.ratingRow}>
-                <Ionicons name="star" size={14} color="#F59E0B" />
-                <Text style={styles.ratingText}>{TRACKING_DATA.driver.rating}</Text>
-                <Text style={styles.tripsText}> • {TRACKING_DATA.driver.trips} chuyến</Text>
+        {driver ? (
+          <View style={styles.driverCard}>
+            <View style={styles.driverInfo}>
+              <Image 
+                source={{ uri: driver.avatar || 'https://images.unsplash.com/photo-1633332755192-727a05c4013d' }} 
+                style={styles.avatar} 
+              />
+              <View style={styles.driverDetails}>
+                <Text style={styles.driverName}>{driver.name || 'Tài xế'}</Text>
+                <View style={styles.ratingRow}>
+                  <Ionicons name="star" size={14} color="#F59E0B" />
+                  <Text style={styles.ratingText}>{driver.rating || '5.0'}</Text>
+                  <Text style={styles.tripsText}> • {driver.trips || '0'} chuyến</Text>
+                </View>
               </View>
             </View>
+            <View style={styles.carInfo}>
+              <Text style={styles.plateNumber}>{driver.plate || '---'}</Text>
+              <Text style={styles.carModel}>{driver.car || 'Đang cập nhật'}</Text>
+            </View>
           </View>
-          <View style={styles.carInfo}>
-            <Text style={styles.plateNumber}>{TRACKING_DATA.driver.plate}</Text>
-            <Text style={styles.carModel}>{TRACKING_DATA.driver.car}</Text>
+        ) : (
+          <View style={[styles.driverCard, { justifyContent: 'center', paddingVertical: 30 }]}>
+            <Text style={{ color: COLORS.textSecondary, fontWeight: '600' }}>
+              Đang kết nối với tài xế...
+            </Text>
           </View>
-        </View>
+        )}
 
         {/* Action Buttons */}
         <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.chatButton}>
+          <TouchableOpacity 
+            style={[styles.chatButton, !driver && { opacity: 0.5 }]}
+            disabled={!driver}
+          >
             <Ionicons name="chatbubble-ellipses" size={20} color={COLORS.primary} />
             <Text style={styles.actionButtonText}>Nhắn tin</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.callButton}>
+          <TouchableOpacity 
+            style={[styles.callButton, !driver && { opacity: 0.5 }]}
+            disabled={!driver}
+          >
             <Ionicons name="call" size={20} color={COLORS.white} />
             <Text style={styles.callButtonText}>Gọi điện</Text>
           </TouchableOpacity>
         </View>
         
+        {/* Route Info */}
+        <View style={styles.routeContainer}>
+          <View style={styles.routeItem}>
+            <View style={[styles.routeDot, { backgroundColor: COLORS.primary }]} />
+            <Text style={styles.routeText} numberOfLines={1}>{bookingData?.pickup_address || 'Đang lấy địa chỉ đón...'}</Text>
+          </View>
+          <View style={styles.routeItem}>
+            <View style={[styles.routeDot, { backgroundColor: '#EF4444' }]} />
+            <Text style={styles.routeText} numberOfLines={1}>{bookingData?.dropoff_address || 'Đang lấy địa chỉ đến...'}</Text>
+          </View>
+          <View style={styles.routeLine} />
+        </View>
+
         {/* Safety & More */}
         <TouchableOpacity style={styles.safetyLink}>
           <Ionicons name="shield-outline" size={16} color={COLORS.textSecondary} />
@@ -443,5 +592,41 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontWeight: '600',
     marginLeft: 10,
+  },
+  // Route Info Styles
+  routeContainer: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: SPACING.lg,
+    position: 'relative',
+  },
+  routeItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 2,
+    marginVertical: 4,
+  },
+  routeDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 12,
+  },
+  routeText: {
+    fontSize: 14,
+    color: COLORS.text,
+    fontWeight: '500',
+    flex: 1,
+  },
+  routeLine: {
+    position: 'absolute',
+    left: 20.5,
+    top: 26,
+    bottom: 26,
+    width: 1,
+    backgroundColor: '#E2E8F0',
+    borderStyle: 'dashed',
+    zIndex: 1,
   },
 });
