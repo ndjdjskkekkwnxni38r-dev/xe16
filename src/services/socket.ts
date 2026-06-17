@@ -1,18 +1,30 @@
 import { io, Socket } from 'socket.io-client';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 const SOCKET_URL = 'wss://admin.datxedulich.vip';
 
 class SocketService {
   private socket: Socket | null = null;
 
-  connect() {
+  async connect() {
     if (this.socket?.connected) return this.socket;
+
+    let token = null;
+    if (Platform.OS === 'web') {
+      token = localStorage.getItem('access_token');
+    } else {
+      token = await SecureStore.getItemAsync('access_token');
+    }
 
     this.socket = io(SOCKET_URL, {
       transports: ['websocket'],
       forceNew: true,
       reconnectionAttempts: 5,
       timeout: 10000,
+      auth: {
+        token: token ? `Bearer ${token}` : null,
+      },
     });
 
     this.socket.on('connect', () => {
@@ -29,7 +41,7 @@ class SocketService {
 
     return this.socket;
   }
-
+// ... rest of the file
   getSocket() {
     return this.socket;
   }

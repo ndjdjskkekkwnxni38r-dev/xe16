@@ -1,6 +1,7 @@
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from '@/components/Map';
 import { useToast } from '@/components/Toast';
 import { POPULAR_DESTINATIONS, type PlaceSuggestion } from '@/constants/data';
+import { POPULAR_LOCATIONS } from '@/constants/locations';
 import { COLORS, SHADOW } from '@/constants/theme';
 import { geocodeAddressFallback, getPlaceDetails, searchAddressSuggestions } from '@/services/addressSearch';
 import socketService from '@/services/socket';
@@ -227,29 +228,47 @@ export default function BookingScreen() {
     Keyboard.dismiss();
 
     try {
-      // Dùng Nominatim để lấy tọa độ từ địa chỉ
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
-        { headers: { 'User-Agent': 'VanBookingApp/1.0' } }
-      );
-      const data = await res.json();
+      const normalizedAddress = address.toLowerCase();
       let coords = null;
-      if (data && data.length > 0) {
-        coords = {
-          latitude: parseFloat(data[0].lat),
-          longitude: parseFloat(data[0].lon),
-        };
+
+      // Kiểm tra danh sách địa điểm nổi tiếng trước
+      for (const key in POPULAR_LOCATIONS) {
+        if (normalizedAddress.includes(key)) {
+          coords = POPULAR_LOCATIONS[key];
+          console.log('[selectDestination] Found in POPULAR_LOCATIONS:', key, coords);
+          break;
+        }
+      }
+
+      // Nếu không tìm thấy trong danh sách, dùng geocoding
+      if (!coords) {
+        // Dùng Nominatim để lấy tọa độ từ địa chỉ
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
+          { headers: { 'User-Agent': 'VanBookingApp/1.0' } }
+        );
+        const data = await res.json();
+        if (data && data.length > 0) {
+          coords = {
+            latitude: parseFloat(data[0].lat),
+            longitude: parseFloat(data[0].lon),
+          };
+          console.log('[selectDestination] Nominatim result:', coords);
+        }
       }
       
       if (!coords) {
         coords = await geocodeAddressFallback(address);
+        console.log('[selectDestination] Fallback result:', coords);
       }
       
       if (!coords) {
         coords = getDefaultDaNangCoords();
+        console.log('[selectDestination] Default result:', coords);
       }
       
       setDestinationCoords(coords);
+      console.log('[selectDestination] Final setDestinationCoords:', coords);
 
       const nextRegion = pickupCoords
         ? {
@@ -571,6 +590,11 @@ export default function BookingScreen() {
         setVehicleOptions([]);
         return;
       }
+
+      console.log('[fetchPricing] Using coordinates:', {
+        pickup: pickupCoords,
+        destination: destinationCoords
+      });
 
       const body = {
         pickup_lat: pickupCoords.latitude,
@@ -936,82 +960,68 @@ export default function BookingScreen() {
                 </View>
 
                 {destFocused && (
-                  <Modal
-                    visible={true}
-                    transparent={true}
-                    animationType="none"
-                    onRequestClose={() => setDestFocused(false)}
-                  >
-                    <TouchableOpacity 
-                      style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]} 
-                      activeOpacity={1} 
-                      onPress={() => setDestFocused(false)}
+                  <View style={styles.suggestionBox}>
+                    <ScrollView
+                      style={styles.suggestionScroll}
+                      contentContainerStyle={{ paddingBottom: 20 }}
+                      nestedScrollEnabled={true}
+                      keyboardShouldPersistTaps="always"
+                      showsVerticalScrollIndicator={true}
                     >
-                      <View style={[styles.suggestionBox, { top: 180, marginHorizontal: 16, height: 300, zIndex: 99999, elevation: 99999 }]}>
-                        <ScrollView
-                          style={{ flex: 1 }}
-                          contentContainerStyle={{ flexGrow: 1, paddingBottom: 20 }}
-                          nestedScrollEnabled={true}
-                          keyboardShouldPersistTaps="always"
-                          showsVerticalScrollIndicator={true}
-                          scrollEnabled={true}
-                        >
-                          {!destination ? (
+                      {!destination ? (
+                        <>
+                          <Text style={styles.suggestionHeader}>ĐIỂM ĐẾN PHỔ BIẾN</Text>
+                          {POPULAR_DESTINATIONS.map((item) => renderDestSuggestionItem(item, 'star'))}
+                        </>
+                      ) : (
+                        <>
+                          <TouchableOpacity
+                            style={styles.suggestionItem}
+                            onPress={() => selectDestination(destination)}
+                          >
+                            <Ionicons name="pin-outline" size={14} color={COLORS.primary} style={{ marginRight: 8 }} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.suggestionMain} numberOfLines={1}>
+                                Sử dụng địa chỉ đã nhập
+                              </Text>
+                              <Text style={styles.suggestionSub} numberOfLines={1}>
+                                {destination}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+
+                          {matchingPopular.length > 0 && (
                             <>
-                              <Text style={styles.suggestionHeader}>ĐIỂM ĐẾN PHỔ BIẾN</Text>
-                              {POPULAR_DESTINATIONS.map((item) => renderDestSuggestionItem(item, 'star'))}
-                            </>
-                          ) : (
-                            <>
-                              <TouchableOpacity
-                                style={styles.suggestionItem}
-                                onPress={() => selectDestination(destination)}
-                              >
-                                <Ionicons name="pin-outline" size={14} color={COLORS.primary} style={{ marginRight: 8 }} />
-                                <View style={{ flex: 1 }}>
-                                  <Text style={styles.suggestionMain} numberOfLines={1}>
-                                    Sử dụng địa chỉ đã nhập
-                                  </Text>
-                                  <Text style={styles.suggestionSub} numberOfLines={1}>
-                                    {destination}
-                                  </Text>
-                                </View>
-                              </TouchableOpacity>
-
-                              {matchingPopular.length > 0 && (
-                                <>
-                                  <Text style={styles.suggestionHeader}>GỢI Ý PHÙ HỢP</Text>
-                                  {matchingPopular.map((item) => renderDestSuggestionItem(item, 'star'))}
-                                </>
-                              )}
-
-                              {destSuggestionsLoading && (
-                                <View style={styles.suggestionLoading}>
-                                  <ActivityIndicator size="small" color={COLORS.primary} />
-                                  <Text style={styles.suggestionLoadingText}>Đang tìm địa chỉ...</Text>
-                                </View>
-                              )}
-
-                              {destSuggestions.length > 0 && (
-                                <>
-                                  <Text style={styles.suggestionHeader}>ĐỊA CHỈ TÌM KIẾM</Text>
-                                  {destSuggestions.map((item) => renderDestSuggestionItem(item, 'location'))}
-                                </>
-                              )}
-
-                              {!destSuggestionsLoading &&
-                                destSuggestions.length === 0 &&
-                                destination.trim().length >= 2 && (
-                                  <Text style={styles.suggestionEmpty}>
-                                    Không tìm thấy gợi ý — bạn có thể dùng địa chỉ đã nhập ở trên
-                                  </Text>
-                                )}
+                              <Text style={styles.suggestionHeader}>GỢI Ý PHÙ HỢP</Text>
+                              {matchingPopular.map((item) => renderDestSuggestionItem(item, 'star'))}
                             </>
                           )}
-                        </ScrollView>
-                      </View>
-                    </TouchableOpacity>
-                  </Modal>
+
+                          {destSuggestionsLoading && (
+                            <View style={styles.suggestionLoading}>
+                              <ActivityIndicator size="small" color={COLORS.primary} />
+                              <Text style={styles.suggestionLoadingText}>Đang tìm địa chỉ...</Text>
+                            </View>
+                          )}
+
+                          {destSuggestions.length > 0 && (
+                            <>
+                              <Text style={styles.suggestionHeader}>ĐỊA CHỈ TÌM KIẾM</Text>
+                              {destSuggestions.map((item) => renderDestSuggestionItem(item, 'location'))}
+                            </>
+                          )}
+
+                          {!destSuggestionsLoading &&
+                            destSuggestions.length === 0 &&
+                            destination.trim().length >= 2 && (
+                              <Text style={styles.suggestionEmpty}>
+                                Không tìm thấy gợi ý — bạn có thể dùng địa chỉ đã nhập ở trên
+                              </Text>
+                            )}
+                        </>
+                      )}
+                    </ScrollView>
+                  </View>
                 )}
               </View>
 
@@ -1030,85 +1040,106 @@ export default function BookingScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 20 }}
         >
-          {vehicleOptions && vehicleOptions.length > 0 ? (
-            vehicleOptions.map((type, index) => {
-              const isActive = selectedType === type.id;
-              
-              // Cải tiến logic URL: Chấp nhận mọi đường dẫn
-              const iconPath = type.icon_url;
-              let finalIconUrl = null;
-              
-              if (iconPath) {
-                if (iconPath.startsWith('http')) {
-                  finalIconUrl = iconPath;
-                } else {
-                  const clean = iconPath.replace(/^\//, '');
-                  finalIconUrl = `https://admin.datxedulich.vip/${clean}`;
-                }
-              }
-
-              return (
-                <TouchableOpacity
-                  key={type.id || index}
-                  onPress={() => setSelectedType(type.id)}
-                  style={[styles.vCard, isActive && styles.vCardActive]}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.vImageContainer}>
-                      {finalIconUrl ? (
-                        <Image 
-                          source={{ uri: finalIconUrl }} 
-                          style={styles.vImage} 
-                          resizeMode="contain" 
-                        />
-                      ) : (
-                        <View style={styles.vNoImageBox}>
-                          <Ionicons name="bus-outline" size={30} color={isActive ? COLORS.primary : "#94A3B8"} />
-                        </View>
-                      )}
-                  </View>
-                  
-                  {/* Container info: Sử dụng flex: 1 để không bao giờ bị đẩy bởi cột giá */}
-                  <View style={styles.vInfoContainer}>
-                    <View style={styles.vNameRow}>
-                      <Text style={[styles.vNameText, isActive && styles.textPrimary]} numberOfLines={1}>
-                        {type.name || 'Loại xe'}
-                      </Text>
-                      {index === 0 && (
-                        <View style={styles.vBadge}>
-                          <Text style={styles.vBadgeText}>TỐT</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.vDescText} numberOfLines={1}>
-                        {type.description || 'Chỗ ngồi thoải mái'}
-                    </Text>
-                    <View style={styles.vEtaRow}>
-                        <Ionicons name="time-outline" size={12} color={COLORS.primary} />
-                        <Text style={styles.vEtaText}>{type.eta_minutes || 5} phút</Text>
-                    </View>
-                  </View>
-
-                  {/* Giá tiền: Cố định width, không dùng flex */}
-                  <View style={styles.vPriceContainer}>
-                    <Text style={[styles.vPriceText, isActive && styles.textPrimary]}>
-                      {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(getFinalPrice(type.price || 0))}
-                    </Text>
-                    {selectedPromo && (
-                      <Text style={{ fontSize: 10, color: COLORS.primary, fontWeight: 'bold' }}>
-                        Đã giảm giá
-                      </Text>
-                    )}
-                    <View style={[styles.vRadio, isActive && styles.vRadioActive]} />
-                  </View>
-                </TouchableOpacity>
-              );
-            })
+          {selectedType ? (
+            // View thu gọn khi đã chọn xe
+            <TouchableOpacity 
+              style={[styles.vCard, styles.vCardActive]}
+              onPress={() => setSelectedType(null)}
+            >
+              <View style={styles.vImageContainer}>
+                  <Ionicons name="car-outline" size={30} color={COLORS.primary} />
+              </View>
+              <View style={styles.vInfoContainer}>
+                <Text style={[styles.vNameText, styles.textPrimary]}>
+                  {vehicleOptions?.find(v => v.id === selectedType)?.name || 'Xe đã chọn'}
+                </Text>
+                <Text style={styles.vDescText}>Nhấn để thay đổi loại xe</Text>
+              </View>
+              <View style={styles.vPriceContainer}>
+                <Text style={[styles.vPriceText, styles.textPrimary]}>
+                  {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(getFinalPrice(vehicleOptions?.find(v => v.id === selectedType)?.price || 0))}
+                </Text>
+              </View>
+            </TouchableOpacity>
           ) : (
-            <View style={styles.emptyCarState}>
-              <ActivityIndicator color={COLORS.primary} />
-              <Text style={styles.emptyCarText}>{vehicleOptions === null ? 'Đang tìm xe gần bạn...' : 'Không tìm thấy xe phù hợp'}</Text>
-            </View>
+            // Danh sách đầy đủ khi chưa chọn xe
+            vehicleOptions && vehicleOptions.length > 0 ? (
+              vehicleOptions.map((type, index) => {
+                const isActive = selectedType === type.id;
+                
+                const iconPath = type.icon_url;
+                let finalIconUrl = null;
+                
+                if (iconPath) {
+                  if (iconPath.startsWith('http')) {
+                    finalIconUrl = iconPath;
+                  } else {
+                    const clean = iconPath.replace(/^\//, '');
+                    finalIconUrl = `https://admin.datxedulich.vip/${clean}`;
+                  }
+                }
+
+                return (
+                  <TouchableOpacity
+                    key={type.id || index}
+                    onPress={() => setSelectedType(type.id)}
+                    style={[styles.vCard, isActive && styles.vCardActive]}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.vImageContainer}>
+                        {finalIconUrl ? (
+                          <Image 
+                            source={{ uri: finalIconUrl }} 
+                            style={styles.vImage} 
+                            resizeMode="contain" 
+                          />
+                        ) : (
+                          <View style={styles.vNoImageBox}>
+                            <Ionicons name="bus-outline" size={30} color={isActive ? COLORS.primary : "#94A3B8"} />
+                          </View>
+                        )}
+                    </View>
+                    
+                    <View style={styles.vInfoContainer}>
+                      <View style={styles.vNameRow}>
+                        <Text style={[styles.vNameText, isActive && styles.textPrimary]} numberOfLines={1}>
+                          {type.name || 'Loại xe'}
+                        </Text>
+                        {index === 0 && (
+                          <View style={styles.vBadge}>
+                            <Text style={styles.vBadgeText}>TỐT</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.vDescText} numberOfLines={1}>
+                          {type.description || 'Chỗ ngồi thoải mái'}
+                      </Text>
+                      <View style={styles.vEtaRow}>
+                          <Ionicons name="time-outline" size={12} color={COLORS.primary} />
+                          <Text style={styles.vEtaText}>{type.eta_minutes || 5} phút</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.vPriceContainer}>
+                      <Text style={[styles.vPriceText, isActive && styles.textPrimary]}>
+                        {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(getFinalPrice(type.price || 0))}
+                      </Text>
+                      {selectedPromo && (
+                        <Text style={{ fontSize: 10, color: COLORS.primary, fontWeight: 'bold' }}>
+                          Đã giảm giá
+                        </Text>
+                      )}
+                      <View style={[styles.vRadio, isActive && styles.vRadioActive]} />
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            ) : (
+              <View style={styles.emptyCarState}>
+                <ActivityIndicator color={COLORS.primary} />
+                <Text style={styles.emptyCarText}>{vehicleOptions === null ? 'Đang tìm xe gần bạn...' : 'Không tìm thấy xe phù hợp'}</Text>
+              </View>
+            )
           )}
         </ScrollView>
 
@@ -1386,7 +1417,7 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   suggestionScroll: {
-    maxHeight: 220,
+    flex: 1,
   },
   suggestionLoading: {
     flexDirection: 'row',
@@ -1444,10 +1475,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginTop: 6,
     marginBottom: 4,
-    position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
+    position: 'relative',
+    height: 300,
     zIndex: 2000,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -1456,7 +1485,7 @@ const styles = StyleSheet.create({
     elevation: 10,
     borderWidth: 1,
     borderColor: '#EEEEEE',
-    overflow: 'visible',
+    overflow: 'hidden',
   },
   suggestionHeader: {
     fontSize: 10,
