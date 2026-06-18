@@ -1,22 +1,26 @@
-import MapView, { Marker, Polyline } from '@/components/Map';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from '@/components/Map';
 import { useToast } from '@/components/Toast';
 import { COLORS, SHADOW, SPACING } from '@/constants/theme';
 import socketService from '@/services/socket';
+import agoraService from '@/services/agoraService';
 import { useUser } from '@/store/UserContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import React, { useEffect, useState } from 'react';
 import {
   Dimensions,
   Image,
+  Linking,
   Platform,
   SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
+  PermissionsAndroid
 } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
@@ -26,6 +30,7 @@ export default function LiveTrackingScreen() {
   const router = useRouter();
   const { showToast } = useToast();
   const { user } = useUser();
+  const insets = useSafeAreaInsets();
   
   const [driver, setDriver] = useState<any>(null);
   const [bookingData, setBookingData] = useState<any>(null);
@@ -159,7 +164,12 @@ export default function LiveTrackingScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" />
       <View style={styles.mapContainer}>
-        <MapView style={styles.map} region={region} showsUserLocation>
+        <MapView 
+          style={StyleSheet.absoluteFillObject} 
+          provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+          region={region} 
+          showsUserLocation
+        >
             {driverRoute.length > 0 && <Polyline coordinates={driverRoute} strokeWidth={4} strokeColor={COLORS.primary} />}
             {bookingData?.pickup_lat && (
               <Marker coordinate={{ latitude: parseFloat(bookingData.pickup_lat), longitude: parseFloat(bookingData.pickup_lng) }}>
@@ -181,7 +191,7 @@ export default function LiveTrackingScreen() {
         </View>
       </SafeAreaView>
 
-      <View style={[styles.bottomSheet, isCollapsed && { height: 60 }]}>
+      <View style={[styles.bottomSheet, isCollapsed && { height: 60 }, { paddingBottom: insets.bottom + SPACING.lg }]}>
         <TouchableOpacity style={styles.collapseHandle} onPress={() => setIsCollapsed(!isCollapsed)}>
           <Ionicons name={isCollapsed ? "reorder-three" : "reorder-three"} size={24} color={COLORS.textSecondary} />
         </TouchableOpacity>
@@ -211,8 +221,28 @@ export default function LiveTrackingScreen() {
             )}
             
             <View style={styles.actionRow}>
-              <TouchableOpacity style={[styles.chatButton, !driver && { opacity: 0.5 }]} disabled={!driver}><Ionicons name="chatbubble-ellipses" size={20} color={COLORS.primary} /><Text style={styles.actionButtonText}>Nhắn tin</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.callButton, !driver && { opacity: 0.5 }]} disabled={!driver}><Ionicons name="call" size={20} color={COLORS.white} /><Text style={styles.callButtonText}>Gọi điện</Text></TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.chatButton, !driver?.phone && { opacity: 0.5 }]} 
+                disabled={!driver?.phone}
+                onPress={() => driver?.phone && Linking.openURL(`sms:${driver.phone}`)}
+              >
+                <Ionicons name="chatbubble-ellipses" size={20} color={COLORS.primary} />
+                <Text style={styles.actionButtonText}>Nhắn tin</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.callButton, !driver?.phone && { opacity: 0.5 }]} 
+                disabled={!driver?.phone}
+                onPress={() => {
+                  if (driver?.phone) {
+                    Linking.openURL(`tel:${driver.phone}`);
+                  } else {
+                    showToast({ message: 'Không tìm thấy số điện thoại', type: 'error' });
+                  }
+                }}
+              >
+                <Ionicons name="call" size={20} color={COLORS.white} />
+                <Text style={styles.callButtonText}>Gọi điện</Text>
+              </TouchableOpacity>
             </View>
 
             <View style={styles.routeContainer}>
@@ -247,7 +277,7 @@ const styles = StyleSheet.create({
     marginTop: -40, // Đẩy lên trên cao hơn
     marginBottom: 15,
   },
-  bottomSheet: { backgroundColor: COLORS.white, borderTopLeftRadius: 35, borderTopRightRadius: 35, padding: SPACING.lg, ...SHADOW.lg, marginTop: -30, zIndex: 100 },
+  bottomSheet: { backgroundColor: COLORS.white, borderTopLeftRadius: 35, borderTopRightRadius: 35, padding: SPACING.lg, paddingBottom: SPACING.xl * 2, ...SHADOW.lg, marginTop: -30, zIndex: 100 },
   driverCard: { flexDirection: 'row', justifyContent: 'space-between', padding: SPACING.md, backgroundColor: '#F8FAFC', borderRadius: 20 },
   driverInfo: { flexDirection: 'row', alignItems: 'center' },
   avatar: { width: 54, height: 54, borderRadius: 27, marginRight: SPACING.md },

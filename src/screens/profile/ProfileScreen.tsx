@@ -17,6 +17,7 @@ import { router } from 'expo-router';
 import { useToast } from '@/components/Toast';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useUser } from '@/store/UserContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const MenuItem = ({ iconName, title, subtitle, onPress, color = COLORS.text }: any) => (
   <TouchableOpacity style={styles.menuItem} onPress={onPress}>
@@ -34,6 +35,7 @@ const MenuItem = ({ iconName, title, subtitle, onPress, color = COLORS.text }: a
 export default function ProfileScreen() {
   const { showToast } = useToast();
   const { user, logout } = useUser();
+  const insets = useSafeAreaInsets();
 
   // Hàm xử lý cho các tính năng chưa hoàn thiện
   const handleWIP = (featureName: string) => {
@@ -63,7 +65,7 @@ export default function ProfileScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
       
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 80 }]}>
         
         {/* Header & Avatar Info */}
         <View style={styles.header}>

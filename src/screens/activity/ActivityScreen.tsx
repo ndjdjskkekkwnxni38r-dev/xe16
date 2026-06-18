@@ -4,17 +4,21 @@ import {
   MaterialCommunityIcons
 } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useState, useMemo } from "react";
+import * as SecureStore from 'expo-secure-store';
+import socketService from '@/services/socket';
+import { useUser } from '@/store/UserContext';
+import React, { useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
+  Platform,
   SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
-  TouchableOpacity,
-  View,
   TextInput,
-  Modal
+  TouchableOpacity,
+  View
 } from "react-native";
 
 const TABS = [
@@ -57,89 +61,29 @@ const CATEGORIES: any = {
   },
 };
 
-const ACTIVITY_DATA = [
-  {
-    id: "1",
-    type: "ride",
-    title: "Van Luxury - Toyota Alphard",
-    date: "31 Th3, 2026 • 14:30",
-    from: "227 Nguyễn Văn Cừ, Quận 5",
-    to: "Sân bay Tân Sơn Nhất",
-    status: "completed",
-    statusLabel: "Đã hoàn thành",
-    price: "250.000đ",
-  },
-  {
-    id: "2",
-    type: "food",
-    title: "Cơm Gà Bà Buội - Hội An",
-    date: "30 Th3, 2026 • 18:45",
-    from: "253 Phan Châu Trinh, Hội An",
-    to: "Novotel Han River, Đà Nẵng",
-    status: "completed",
-    statusLabel: "Đã giao hàng",
-    price: "145.000đ",
-  },
-  {
-    id: "3",
-    type: "ride",
-    title: "Chuyến đi liên tỉnh - Ford Transit",
-    date: "Hôm nay • 10:30",
-    from: "Ga Đà Nẵng",
-    to: "Bà Nà Hills",
-    status: "ongoing",
-    statusLabel: "Đang đón khách",
-    price: "450.000đ",
-  },
-  {
-    id: "4",
-    type: "delivery",
-    title: "Giao hàng nhanh - Hỏa tốc",
-    date: "28 Th3, 2026 • 09:15",
-    from: "Kho hàng Shopee, Quận 7",
-    to: "Landmark 81, Bình Thạnh",
-    status: "cancelled",
-    statusLabel: "Đã hủy",
-    price: "35.000đ",
-  },
-  {
-    id: "5",
-    type: "hotel",
-    title: "InterContinental Danang Resort",
-    date: "20 Th3 - 22 Th3, 2026",
-    from: "Phòng King Bed Ocean View",
-    to: "Check-in: 14:00 • Check-out: 12:00",
-    status: "completed",
-    statusLabel: "Đã hoàn tất kỳ nghỉ",
-    price: "12.500.000đ",
-  },
-  {
-    id: "6",
-    type: "attraction",
-    title: "Vé Sun World Bà Nà Hills",
-    date: "21 Th3, 2026",
-    from: "Vé người lớn - Bao gồm Buffet",
-    to: "Số lượng: 02 Vé",
-    status: "completed",
-    statusLabel: "Đã sử dụng",
-    price: "2.100.000đ",
-  },
-];
-
 const StatusBadge = ({ status, label }: { status: string; label: string }) => {
   let bgColor = "#F1F5F9";
   let textColor = "#64748B";
   let iconName: any = "time-outline";
 
-  if (status === "completed") {
+  // Normalize status for comparison
+  const s = status.toLowerCase();
+
+  if (s.includes("completed") || s.includes("hoàn thành")) {
     bgColor = "#DCFCE7";
     textColor = "#16A34A";
     iconName = "checkmark-circle";
-  } else if (status === "ongoing") {
+  } else if (
+    s.includes("ongoing") || 
+    s.includes("driver_found") || 
+    s.includes("accepted") || 
+    s.includes("driving") ||
+    s.includes("đang")
+  ) {
     bgColor = "#E0F2FE";
     textColor = "#0284C7";
     iconName = "time";
-  } else if (status === "cancelled") {
+  } else if (s.includes("cancelled") || s.includes("hủy")) {
     bgColor = "#FEE2E2";
     textColor = "#DC2626";
     iconName = "close-circle";
@@ -160,14 +104,14 @@ const StatusBadge = ({ status, label }: { status: string; label: string }) => {
   );
 };
 
-const ActivityItem = ({ item }: { item: (typeof ACTIVITY_DATA)[0] }) => {
+const ActivityItem = ({ item }: { item: any }) => {
   const router = useRouter();
   const category = CATEGORIES[item.type] || CATEGORIES.ride;
   const IconLib = category.library;
   const categoryColor = category.color;
 
   const handlePress = () => {
-    if (item.status === "ongoing") {
+    if (['ongoing', 'driver_found', 'accepted', 'driving'].includes(item.status)) {
       router.push(`/activity/tracking/${item.id}`);
     }
   };
@@ -243,7 +187,7 @@ const ActivityItem = ({ item }: { item: (typeof ACTIVITY_DATA)[0] }) => {
         <StatusBadge status={item.status} label={item.statusLabel} />
       </View>
 
-      {item.status === "ongoing" && (
+      {['ongoing', 'driver_found', 'accepted', 'driving'].includes(item.status) && (
         <TouchableOpacity style={styles.trackButton} onPress={handlePress}>
           <Ionicons name="navigate" size={16} color={COLORS.white} />
           <Text style={trackButtonTextStyles.text}>Theo dõi trực tiếp</Text>
@@ -253,7 +197,6 @@ const ActivityItem = ({ item }: { item: (typeof ACTIVITY_DATA)[0] }) => {
   );
 };
 
-// Extracted style to avoid complex object in JSX
 const trackButtonTextStyles = StyleSheet.create({
   text: {
     color: COLORS.white,
@@ -264,15 +207,120 @@ const trackButtonTextStyles = StyleSheet.create({
 });
 
 export default function ActivityScreen() {
+  const { user } = useUser();
   const [activeTab, setActiveTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchBookings = async () => {
+    setLoading(true);
+    try {
+      const token = Platform.OS === 'web' ? localStorage.getItem('access_token') : await SecureStore.getItemAsync('access_token');
+      
+      console.log('[ActivityScreen] Fetching with token:', token ? 'Token exists' : 'Token is NULL');
+      console.log('[ActivityScreen] Fetching from:', 'https://admin.datxedulich.vip/api/customer/bookings/history');
+      
+      if (!token) {
+        console.error('[ActivityScreen] No token found, aborting fetch.');
+        return;
+      }
+
+      const response = await fetch('https://admin.datxedulich.vip/api/customer/bookings/history', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const responseText = await response.text();
+      console.log('[ActivityScreen] Raw Response:', responseText);
+
+      if (!response.ok) {
+        console.error('[ActivityScreen] API error status:', response.status);
+        if (response.status === 401) {
+          console.error('[ActivityScreen] Token likely expired.');
+        }
+        return;
+      }
+
+      const resData = JSON.parse(responseText);
+      const bookingsArray = Array.isArray(resData.data) ? resData.data : (Array.isArray(resData) ? resData : []);
+
+      if (bookingsArray.length > 0) {
+        const mapped = bookingsArray
+          .filter((b: any) => b && (b.id !== undefined || b.booking_id !== undefined))
+          .map((b: any) => ({
+            id: (b.id || b.booking_id || Math.random().toString()).toString(),
+            type: 'ride', 
+            title: b.vehicle_type?.name || 'Đặt xe',
+            date: b.created_at || '---',
+            from: b.pickup_address || '---',
+            to: b.dropoff_address || '---',
+            // Ensure status is always lowercase for consistent filtering
+            status: (b.status || b.status_text || 'unknown').toLowerCase(),
+            statusLabel: b.status_label || b.status_text || '---',
+            price: b.total_price ? new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(b.total_price) : '---'
+          }));
+        setBookings(mapped);
+      } else {
+        console.log('[ActivityScreen] No bookings found in response:', resData);
+      }
+    } catch (e) { 
+      console.error('[ActivityScreen] Error during fetch:', e); 
+    }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => {
+    fetchBookings(); // Load data on mount
+
+    if (!user?.id) return;
+
+    const setupSocket = async () => {
+      await socketService.connect();
+      const socket = socketService.getSocket();
+      if (!socket) return;
+
+      // Handle general booking updates
+      socket.on('booking_updated', (data: any) => {
+        console.log('[Socket] booking_updated:', data);
+        fetchBookings(); // Refresh list
+      });
+
+      // Handle search timeout specifically using user ID
+      const eventName = `laravel_database_private-customer.${user.id}:booking-search-timeout`;
+      socket.on(eventName, (data: any) => {
+        console.log('[Socket] Received booking-search-timeout:', data);
+        fetchBookings(); // Refresh to show updated status
+      });
+    };
+
+    setupSocket();
+
+    return () => {
+      socketService.off('booking_updated');
+      const eventName = `laravel_database_private-customer.${user.id}:booking-search-timeout`;
+      socketService.off(eventName);
+    };
+  }, [user?.id]);
 
   const filteredData = useMemo(() => {
-    return ACTIVITY_DATA.filter((item) => {
-      const matchTab = activeTab === "all" || item.status === activeTab;
+    return bookings.filter((item) => {
+      // API returns 'status': 'accepted' for ongoing rides.
+      // Normalize to lowercase for reliable comparison.
+      const status = item.status.toLowerCase(); 
+      const ongoingStatuses = ['ongoing', 'driver_found', 'accepted', 'driving', 'arrived'];
+      
+      const isOngoing = ongoingStatuses.includes(status);
+      
+      const matchTab = activeTab === "all" || 
+                       (activeTab === 'ongoing' ? isOngoing : status === activeTab);
+      
       const matchCat = selectedCategory === "all" || item.type === selectedCategory;
       const matchSearch = searchQuery === "" || 
         item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -281,13 +329,12 @@ export default function ActivityScreen() {
       
       return matchTab && matchCat && matchSearch;
     });
-  }, [activeTab, selectedCategory, searchQuery]);
+  }, [activeTab, selectedCategory, searchQuery, bookings]);
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
 
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
           {showSearch ? (
@@ -296,7 +343,7 @@ export default function ActivityScreen() {
                 <Ionicons name="search" size={20} color="#94A3B8" />
                 <TextInput
                   style={styles.searchInput}
-                  placeholder="Tìm kiếm chuyến đi, đồ ăn..."
+                  placeholder="Tìm kiếm..."
                   placeholderTextColor="#94A3B8"
                   value={searchQuery}
                   onChangeText={setSearchQuery}
@@ -308,134 +355,56 @@ export default function ActivityScreen() {
                   </TouchableOpacity>
                 )}
               </View>
-              <TouchableOpacity style={styles.cancelSearchBtn} onPress={() => {
-                setShowSearch(false);
-                setSearchQuery("");
-              }}>
+              <TouchableOpacity style={styles.cancelSearchBtn} onPress={() => { setShowSearch(false); setSearchQuery(""); }}>
                 <Text style={styles.cancelSearchText}>Hủy</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <>
-              <View>
-                <Text style={styles.headerSubtitle}>Lịch sử của bạn</Text>
+              <View style={{ marginTop: 20 }}>
                 <Text style={styles.headerTitle}>Hoạt động</Text>
               </View>
               <View style={styles.headerActions}>
                 <TouchableOpacity style={styles.iconButton} onPress={() => setShowSearch(true)}>
                   <Ionicons name="search" size={20} color={COLORS.text} />
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.iconButton, { marginLeft: SPACING.sm, backgroundColor: selectedCategory !== "all" ? '#F0F9FF' : '#F8FAFC', borderColor: selectedCategory !== "all" ? '#BAE6FD' : '#E2E8F0' }]}
-                  onPress={() => setFilterModalVisible(true)}
-                >
-                  <Ionicons name="filter" size={20} color={selectedCategory !== "all" ? COLORS.primary : COLORS.text} />
-                </TouchableOpacity>
               </View>
             </>
           )}
         </View>
 
-        {/* Custom Tab Switcher */}
         <View style={styles.tabContainer}>
           <View style={styles.tabBar}>
             {TABS.map((tab) => (
               <TouchableOpacity
                 key={tab.id}
-                style={[
-                  styles.tabItem,
-                  activeTab === tab.id && styles.activeTabItem,
-                ]}
+                style={[styles.tabItem, activeTab === tab.id && styles.activeTabItem]}
                 onPress={() => setActiveTab(tab.id)}
               >
-                <Text
-                  style={[
-                    styles.tabLabel,
-                    activeTab === tab.id && styles.activeTabLabel,
-                  ]}
-                >
-                  {tab.label}
-                </Text>
+                <Text style={[styles.tabLabel, activeTab === tab.id && styles.activeTabLabel]}>{tab.label}</Text>
               </TouchableOpacity>
             ))}
           </View>
         </View>
       </View>
 
-      <FlatList
-        data={filteredData}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <ActivityItem item={item} />}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIconContainer}>
-              <Ionicons name="time-outline" size={48} color={COLORS.border} />
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center' }}><ActivityIndicator size="large" color={COLORS.primary} /></View>
+      ) : (
+        <FlatList
+          data={filteredData}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => <ActivityItem item={item} />}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIconContainer}><Ionicons name="time-outline" size={48} color={COLORS.border} /></View>
+              <Text style={styles.emptyTitle}>Không có hoạt động</Text>
             </View>
-            <Text style={styles.emptyTitle}>Không tìm thấy hoạt động</Text>
-            <Text style={styles.emptyText}>
-              Dường như bạn chưa có hoạt động nào trong danh mục này.
-            </Text>
-            <TouchableOpacity
-              style={styles.emptyButton}
-              onPress={() => setActiveTab("all")}
-            >
-              <Text style={styles.emptyButtonText}>Xem tất cả</Text>
-            </TouchableOpacity>
-          </View>
-        }
-      />
-
-      {/* Filter Modal */}
-      <Modal visible={filterModalVisible} animationType="slide" transparent={true} onRequestClose={() => setFilterModalVisible(false)}>
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Lọc theo dịch vụ</Text>
-              <TouchableOpacity onPress={() => setFilterModalVisible(false)} style={styles.closeModalBtn}>
-                <Ionicons name="close" size={24} color="#0F172A" />
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity 
-              style={[styles.filterOption, selectedCategory === 'all' && styles.filterOptionActive]}
-              onPress={() => setSelectedCategory('all')}
-            >
-              <View style={styles.filterOptionContent}>
-                <Ionicons name="apps" size={22} color={selectedCategory === 'all' ? COLORS.primary : '#64748B'} />
-                <Text style={[styles.filterOptionText, selectedCategory === 'all' && styles.filterOptionTextActive]}>Tất cả dịch vụ</Text>
-              </View>
-              {selectedCategory === 'all' && <Ionicons name="checkmark-circle" size={24} color={COLORS.primary} />}
-            </TouchableOpacity>
-
-            {Object.keys(CATEGORIES).map((key) => {
-              const cat = CATEGORIES[key];
-              const isSelected = selectedCategory === key;
-              const IconLib = cat.library;
-              
-              return (
-                <TouchableOpacity 
-                  key={key}
-                  style={[styles.filterOption, isSelected && styles.filterOptionActive]}
-                  onPress={() => setSelectedCategory(key)}
-                >
-                  <View style={styles.filterOptionContent}>
-                    <IconLib name={cat.icon} size={22} color={isSelected ? COLORS.primary : '#64748B'} />
-                    <Text style={[styles.filterOptionText, isSelected && styles.filterOptionTextActive]}>{cat.label}</Text>
-                  </View>
-                  {isSelected && <Ionicons name="checkmark-circle" size={24} color={COLORS.primary} />}
-                </TouchableOpacity>
-              );
-            })}
-
-            <TouchableOpacity style={styles.applyBtn} onPress={() => setFilterModalVisible(false)}>
-              <Text style={styles.applyBtnText}>Áp dụng</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -666,7 +635,7 @@ const styles = StyleSheet.create({
     borderRadius: 50,
     backgroundColor: COLORS.white,
     justifyContent: "center",
-    alignItems: "center",
+    alignItems: 'center',
     marginBottom: SPACING.lg,
     ...SHADOW.sm,
   },
@@ -675,26 +644,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: COLORS.text,
     marginBottom: 8,
-  },
-  emptyText: {
-    color: COLORS.textSecondary,
-    fontSize: 15,
-    textAlign: "center",
-    lineHeight: 22,
-    marginBottom: SPACING.xl,
-  },
-  emptyButton: {
-    backgroundColor: COLORS.white,
-    paddingHorizontal: SPACING.xl,
-    paddingVertical: SPACING.md,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-  },
-  emptyButtonText: {
-    color: COLORS.primary,
-    fontWeight: "700",
-    fontSize: 15,
   },
   searchBarContainer: {
     flexDirection: 'row',
@@ -728,20 +677,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  
-  // Modal Styles
-  modalContainer: { flex: 1, backgroundColor: 'rgba(15,23,42,0.6)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 32, borderTopRightRadius: 32, padding: 24, paddingBottom: 40 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 25 },
-  modalTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A' },
-  closeModalBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' },
-  
-  filterOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, paddingHorizontal: 20, borderRadius: 16, marginBottom: 10, borderWidth: 1.5, borderColor: '#F1F5F9', backgroundColor: '#F8FAFC' },
-  filterOptionActive: { borderColor: '#BAE6FD', backgroundColor: '#F0F9FF' },
-  filterOptionContent: { flexDirection: 'row', alignItems: 'center', gap: 15 },
-  filterOptionText: { fontSize: 16, fontWeight: '600', color: '#475569' },
-  filterOptionTextActive: { color: COLORS.primary, fontWeight: '800' },
-
-  applyBtn: { backgroundColor: COLORS.primary, padding: 18, borderRadius: 16, alignItems: 'center', ...SHADOW.sm, marginTop: 15 },
-  applyBtnText: { color: '#FFF', fontWeight: '800', fontSize: 16, letterSpacing: 0.5 }
 });

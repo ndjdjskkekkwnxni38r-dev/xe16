@@ -419,7 +419,7 @@ export default function BookingScreen() {
       // Chạy SONG SONG 3 API cùng lúc, lấy kết quả nhanh nhất
       // có chứa số nhà + tên đường
       // ============================================================
-      const GOOGLE_KEY = "AIzaSyC6-7Vxt6ycQXeyIE3kVjus3_ZfneXv-T4"; // <= ĐÂY LÀ CHỖ CẦN KIỂM TRA
+      const GOOGLE_KEY = "AIzaSyAUg7qG4UpXMscCzcyXttGUOrjeM0GWXi4"; // <= ĐÂY LÀ CHỖ CẦN KIỂM TRA
 
       // --- Hàm fetch OSM Nominatim ---
       const fetchNominatim = async (): Promise<string> => {
@@ -574,7 +574,6 @@ export default function BookingScreen() {
 
   // Gọi API lấy giá khi destination thay đổi
   const fetchPricing = async (dest: string) => {
-    // if (dest.length < 3) return; // Removed this constraint to ensure API call happens
     setPricingLoading(true);
     try {
       let token = null;
@@ -584,17 +583,11 @@ export default function BookingScreen() {
         token = await SecureStore.getItemAsync('access_token');
       }
 
-      // API requires coordinates, not addresses
       if (!pickupCoords || !destinationCoords) {
-        console.warn('[fetchPricing] Missing coordinates, skipping API call');
+        console.warn('[fetchPricing] Missing coordinates');
         setVehicleOptions([]);
         return;
       }
-
-      console.log('[fetchPricing] Using coordinates:', {
-        pickup: pickupCoords,
-        destination: destinationCoords
-      });
 
       const body = {
         pickup_lat: pickupCoords.latitude,
@@ -603,7 +596,6 @@ export default function BookingScreen() {
         dropoff_lng: destinationCoords.longitude,
         promo_code: selectedPromo?.code || null,
       };
-      console.log('[fetchPricing] Sending Body:', body);
 
       const response = await fetch('https://admin.datxedulich.vip/api/customer/drivers/nearby', {
         method: 'POST',
@@ -613,43 +605,40 @@ export default function BookingScreen() {
         },
         body: JSON.stringify(body),
       });
+
       const data = await response.json();
       
-      console.log('[fetchPricing] FULL API Response:', JSON.stringify(data, null, 2));
-      
-      // Map API response format to expected format
-      const apiVehicles = data.data || [];
-      const rootQuoteId = data.quote_id; 
-      
-      if (response.ok && Array.isArray(apiVehicles) && apiVehicles.length > 0) {
-        // Map API fields to expected format
-        const mappedVehicles = apiVehicles.map((v: any) => {
-          return {
+      if (response.ok) {
+        const apiVehicles = data.data || [];
+        const rootQuoteId = data.quote_id; 
+        
+        if (Array.isArray(apiVehicles) && apiVehicles.length > 0) {
+          const mappedVehicles = apiVehicles.map((v: any) => ({
             id: v.vehicle_type_id?.toString(),
-            quote_id: rootQuoteId, // Assign root quote_id to each vehicle
+            quote_id: rootQuoteId,
             name: v.name,
             price: v.final_price || v.price || v.estimated_price,
             description: v.description,
             is_available: v.is_available,
             eta_minutes: v.eta_minutes || 5, 
             icon_url: v.icon_url,
-          };
-        })
-        .filter((v: any) => v.is_available !== false) // Filter out unavailable vehicles
-        .sort((a: any, b: any) => a.eta_minutes - b.eta_minutes); // Sort by ETA (nearest first)
-        
-        console.log('[fetchPricing] Mapped & Sorted vehicles:', mappedVehicles);
-        
-        if (mappedVehicles.length > 0) {
-          setVehicleOptions(mappedVehicles);
-          setSelectedType(mappedVehicles[0].id);
+          }))
+          .filter((v: any) => v.is_available !== false)
+          .sort((a: any, b: any) => a.eta_minutes - b.eta_minutes);
+          
+          if (mappedVehicles.length > 0) {
+            setVehicleOptions(mappedVehicles);
+            if (!selectedType) setSelectedType(mappedVehicles[0].id);
+          } else {
+            setVehicleOptions([]);
+          }
         } else {
-          console.warn('[fetchPricing] No available vehicles after filtering');
           setVehicleOptions([]);
         }
       } else {
-        console.warn('[fetchPricing] API không trả về xe, response:', response.status, 'data:', data);
+        console.warn('[fetchPricing] API error:', response.status);
         setVehicleOptions([]);
+        // Optional: showToast if needed, but might be too noisy for auto-refresh
       }
     } catch (error) {
       console.error('[fetchPricing] API Error:', error);
@@ -666,12 +655,24 @@ export default function BookingScreen() {
     console.log(' - pickupCoords:', pickupCoords);
     console.log(' - selectedPromo:', selectedPromo);
     
+    let interval: ReturnType<typeof setInterval> | null = null;
+
     if (destinationCoords && pickupCoords) {
       console.log('[DEBUG] Both coords present, calling fetchPricing.');
       fetchPricing(destination);
+      
+      // Thiết lập interval để tự động làm mới sau mỗi 5 giây
+      interval = setInterval(() => {
+        console.log('[DEBUG] Auto-refreshing vehicle options...');
+        fetchPricing(destination);
+      }, 5000);
     } else {
       console.log('[DEBUG] Missing coords, skipping fetchPricing.');
     }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [destinationCoords, pickupCoords, selectedPromo]);
 
   // Dọn dẹp socket khi component unmount
@@ -683,32 +684,23 @@ export default function BookingScreen() {
 
   const handleConfirmRide = async () => {
     console.log('[handleConfirmRide] Starting...');
-    console.log('[handleConfirmRide] Current pickup:', pickup);
-    console.log('[handleConfirmRide] Current destination:', destination);
-
+    
     if (!pickup) {
-        console.log('[handleConfirmRide] Error: Pickup address missing');
         showToast({ message: 'Vui lòng nhập điểm đón', type: 'error' });
         return;
     }
 
     if (!destination) {
-      console.log('[handleConfirmRide] Error: Destination missing');
       showToast({ message: 'Vui lòng nhập điểm đến', type: 'error' });
       return;
     }
 
-    console.log('[handleConfirmRide] selectedType:', selectedType);
-    console.log('[handleConfirmRide] vehicleOptions:', vehicleOptions);
     const selectedVan = vehicleOptions?.find(v => v.id === selectedType);
-    
     if (!selectedVan) {
-      console.log('[handleConfirmRide] Error: Van not found or not selected');
       showToast({ message: 'Vui lòng chọn loại xe', type: 'error' });
       return;
     }
 
-    console.log('[handleConfirmRide] Selected Van:', selectedVan);
     setLoading(true);
     try {
       let token = null;
@@ -719,7 +711,6 @@ export default function BookingScreen() {
       }
 
       if (!token) {
-        console.log('[handleConfirmRide] Error: Token missing');
         showToast({ message: 'Vui lòng đăng nhập để đặt xe', type: 'error' });
         router.replace('/send-otp');
         return;
@@ -734,7 +725,6 @@ export default function BookingScreen() {
         promo_code: selectedPromo?.code || appliedPromo || null,
         payment_method: selectedPayment?.code || 'cash',
       };
-      console.log('[handleConfirmRide] Sending Booking Body:', bodyData);
 
       const response = await fetch('https://admin.datxedulich.vip/api/customer/bookings/create', {
         method: 'POST',
@@ -747,50 +737,37 @@ export default function BookingScreen() {
       });
 
       const data = await response.json();
-      console.log('[handleConfirmRide] Booking API Response:', response.status, data);
 
       if (response.ok) {
-        console.log('[handleConfirmRide] SUCCESS response data:', JSON.stringify(data, null, 2));
-
-        // Attempt to find booking ID in every possible field mentioned or common in Laravel
         const bookingId = 
           data.data?.id || 
           data.id || 
           data.booking_id || 
           data.data?.booking_id ||
           data.booking?.id ||
-          data.data?.booking?.id ||
-          (typeof data.data === 'number' ? data.data : null) ||
-          (typeof data.id === 'number' ? data.id : null);
-        
-        console.log('[handleConfirmRide] Final extracted bookingId:', bookingId);
+          data.data?.booking?.id;
         
         if (bookingId) {
-          showToast({ message: 'Đang tìm tài xế cho bạn...', type: 'success' });
-          
-          // Use absolute path for reliable redirection
-          const targetPath = `/activity/tracking/${bookingId}`;
-          console.log('[handleConfirmRide] Redirecting to:', targetPath);
-          
-          // Small delay to let the toast show and ensure state is stable
-          setTimeout(() => {
-            router.replace(targetPath as any);
-          }, 500);
+          showToast({ message: 'Đặt xe thành công! Đang tìm tài xế...', type: 'success' });
+          router.replace(`/activity/tracking/${bookingId}` as any);
         } else {
-          // If we reach here, it means response was 200 OK but we couldn't find an ID
-          console.error('[handleConfirmRide] SUCCESS but NO ID. Response:', data);
-          showToast({ 
-            message: 'Đặt xe thành công! Không tìm thấy mã đơn, đang chuyển đến lịch sử.', 
-            type: 'info' 
-          });
-          setTimeout(() => router.replace('/history'), 2000);
+          showToast({ message: 'Đặt xe thành công! Không tìm thấy mã đơn.', type: 'info' });
+          router.replace('/history');
         }
       } else {
-        showToast({ message: data.message || 'Đặt xe thất bại', type: 'error' });
+        // Handle specific API error codes
+        if (response.status === 401) {
+          showToast({ message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.', type: 'error' });
+          router.replace('/send-otp');
+        } else if (response.status === 422) {
+          showToast({ message: data.message || 'Dữ liệu đặt xe không hợp lệ.', type: 'error' });
+        } else {
+          showToast({ message: data.message || 'Đặt xe thất bại. Vui lòng thử lại.', type: 'error' });
+        }
       }
     } catch (error) {
       console.error('[handleConfirmRide] Catch error:', error);
-      showToast({ message: 'Lỗi kết nối máy chủ', type: 'error' });
+      showToast({ message: 'Lỗi kết nối máy chủ. Vui lòng kiểm tra lại mạng.', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -801,8 +778,8 @@ export default function BookingScreen() {
       <View style={{ flex: 1 }}>
         <MapView
           ref={mapRef}
-          style={styles.map}
-          provider={Platform.OS !== 'web' ? PROVIDER_GOOGLE : undefined}
+          style={StyleSheet.absoluteFillObject}
+          provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
           region={mapRegion}
           showsUserLocation
           scrollEnabled={!destFocused}

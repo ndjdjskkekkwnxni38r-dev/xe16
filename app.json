@@ -22,7 +22,12 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.anonymous.VanBookingApp",
-      "googleMapsApiKey": "AIzaSyC6-7Vxt6ycQXeyIE3kVjus3_ZfneXv-T4"
+      "googleMapsApiKey": "AIzaSyAUg7qG4UpXMscCzcyXttGUOrjeM0GWXi4",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAUg7qG4UpXMscCzcyXttGUOrjeM0GWXi4"
+        }
+      }
     },
     "web": {
       "bundler": "metro",
