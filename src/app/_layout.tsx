@@ -61,6 +61,7 @@ function RootLayoutNav() {
         <Stack.Screen name="send-otp" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="verify-otp" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="rate-booking" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="chat" options={{ animation: 'slide_from_right' }} />
       </Stack>
     </ThemeProvider>
   );

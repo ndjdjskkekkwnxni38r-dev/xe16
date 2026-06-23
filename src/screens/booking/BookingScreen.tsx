@@ -606,7 +606,15 @@ export default function BookingScreen() {
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (_) {
+        console.warn('[fetchPricing] Non-JSON response:', text.substring(0, 200));
+        setVehicleOptions([]);
+        return;
+      }
       
       if (response.ok) {
         const apiVehicles = data.data || [];

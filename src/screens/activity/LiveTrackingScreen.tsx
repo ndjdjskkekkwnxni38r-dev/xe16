@@ -360,9 +360,19 @@ export default function LiveTrackingScreen() {
             
             <View style={styles.actionRow}>
               <TouchableOpacity 
-                style={[styles.chatButton, !driver?.phone && { opacity: 0.5 }]} 
-                disabled={!driver?.phone}
-                onPress={() => driver?.phone && Linking.openURL(`sms:${driver.phone}`)}
+                style={[styles.chatButton, !driver && { opacity: 0.5 }]} 
+                disabled={!driver}
+                onPress={() => {
+                  if (driver) {
+                    router.push({
+                      pathname: '/chat',
+                      params: {
+                        id: id as string,
+                        driverName: driver.name || 'Tài xế',
+                      },
+                    });
+                  }
+                }}
               >
                 <Ionicons name="chatbubble-ellipses" size={20} color={COLORS.primary} />
                 <Text style={styles.actionButtonText}>Nhắn tin</Text>

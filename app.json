@@ -22,6 +22,7 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.anonymous.VanBookingApp",
+      "softwareKeyboardLayoutMode": "pan",
       "googleMapsApiKey": "AIzaSyAUg7qG4UpXMscCzcyXttGUOrjeM0GWXi4",
       "config": {
         "googleMaps": {
