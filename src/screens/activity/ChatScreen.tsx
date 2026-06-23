@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  InteractionManager,
   Keyboard,
   Platform,
   StyleSheet,
@@ -64,20 +65,29 @@ export default function ChatScreen() {
 
   useEffect(() => { fetchMessages(); }, [fetchMessages]);
 
+  const lastContentHeight = useRef(0);
+
+  const doScroll = useCallback(() => {
+    const list = flatListRef.current;
+    if (!list) return;
+    list.scrollToOffset({ offset: 999999, animated: false });
+    InteractionManager.runAfterInteractions(() => {
+      flatListRef.current?.scrollToOffset({ offset: 999999, animated: false });
+    });
+  }, []);
+
   useEffect(() => {
-    if (messages.length > 0) {
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
-    }
-  }, [messages.length]);
+    doScroll();
+  }, [messages.length, doScroll]);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
       setKbHeight(e.endCoordinates.height);
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 300);
+      doScroll();
     });
     const hideSub = Keyboard.addListener('keyboardDidHide', () => setKbHeight(0));
     return () => { showSub.remove(); hideSub.remove(); };
-  }, []);
+  }, [doScroll]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -150,6 +160,9 @@ export default function ChatScreen() {
         const data = JSON.parse(resText);
         if (response.ok && data.data) {
           setMessages((prev) => [...prev, data.data]);
+          setTimeout(doScroll, 100);
+          setTimeout(doScroll, 300);
+          setTimeout(doScroll, 600);
         } else {
           setInputText(text);
         }
@@ -241,13 +254,21 @@ export default function ChatScreen() {
         ) : (
           <FlatList
             ref={flatListRef}
+            style={{ flex: 1 }}
             data={messages}
             keyExtractor={(item, index) => item.id?.toString() || `msg-${index}`}
             renderItem={renderMessage}
             contentContainerStyle={[styles.listContent, { paddingBottom: inputBottom + 60 }]}
-            onContentSizeChange={() => {
-              flatListRef.current?.scrollToEnd({ animated: false });
+            initialNumToRender={50}
+            maxToRenderPerBatch={50}
+            windowSize={21}
+            onContentSizeChange={(_w, h) => {
+              if (h > lastContentHeight.current) {
+                doScroll();
+              }
+              lastContentHeight.current = h;
             }}
+            onScrollToIndexFailed={doScroll}
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
               <View style={styles.emptyWrap}>
