@@ -1,12 +1,10 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
-import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { ToastProvider } from '@/components/Toast';
@@ -18,24 +16,13 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [appIsReady, setAppIsReady] = useState(false);
-  const [loaded, error] = useFonts({
-    SpaceMono: require('../../assets/fonts/SpaceMono-Regular.ttf'),
-    ...FontAwesome.font,
-  });
 
   useEffect(() => {
-    if (error) throw error;
-  }, [error]);
-
-  useEffect(() => {
-    if (loaded) {
-      setAppIsReady(true);
-      // Giảm độ trễ một chút để mọi thứ render ổn định trong background
-      setTimeout(async () => {
-        await SplashScreen.hideAsync();
-      }, 500);
-    }
-  }, [loaded]);
+    setAppIsReady(true);
+    setTimeout(async () => {
+      await SplashScreen.hideAsync();
+    }, 500);
+  }, []);
 
   if (!appIsReady) {
     return null;
@@ -73,6 +60,7 @@ function RootLayoutNav() {
         <Stack.Screen name="wallet" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="send-otp" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="verify-otp" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="rate-booking" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       </Stack>
     </ThemeProvider>
   );

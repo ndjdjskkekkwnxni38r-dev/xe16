@@ -20,23 +20,24 @@ class SocketService {
     this.socket = io(SOCKET_URL, {
       transports: ['websocket'],
       forceNew: true,
-      reconnectionAttempts: 5,
-      timeout: 10000,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
       auth: {
         token: token ? `Bearer ${token}` : null,
       },
     });
 
     this.socket.on('connect', () => {
-      console.log('[Socket] Connected to server:', SOCKET_URL);
+      console.log('[Socket] Connected to server:', SOCKET_URL, 'ID:', this.socket?.id);
     });
 
     this.socket.on('connect_error', (error) => {
       console.error('[Socket] Connection Error:', error);
     });
 
-    this.socket.on('disconnect', (reason) => {
-      console.log('[Socket] Disconnected:', reason);
+    // Thêm logging cho các hành động emit và on
+    this.socket.onAny((event, ...args) => {
+      console.log(`[Socket] Global event received: ${event}`, args);
     });
 
     return this.socket;
@@ -47,12 +48,14 @@ class SocketService {
   }
 
   emit(event: string, data: any) {
+    console.log(`[Socket] Emitting event: ${event}`, data);
     if (this.socket) {
       this.socket.emit(event, data);
     }
   }
 
   on(event: string, callback: (data: any) => void) {
+    console.log(`[Socket] Setting up listener for: ${event}`);
     if (this.socket) {
       this.socket.on(event, callback);
     }

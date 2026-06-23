@@ -4,6 +4,7 @@ import {
   MaterialCommunityIcons
 } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from '@react-navigation/native';
 import * as SecureStore from 'expo-secure-store';
 import socketService from '@/services/socket';
 import { useUser } from '@/store/UserContext';
@@ -66,7 +67,6 @@ const StatusBadge = ({ status, label }: { status: string; label: string }) => {
   let textColor = "#64748B";
   let iconName: any = "time-outline";
 
-  // Normalize status for comparison
   const s = status.toLowerCase();
 
   if (s.includes("completed") || s.includes("hoàn thành")) {
@@ -74,10 +74,10 @@ const StatusBadge = ({ status, label }: { status: string; label: string }) => {
     textColor = "#16A34A";
     iconName = "checkmark-circle";
   } else if (
-    s.includes("ongoing") || 
-    s.includes("driver_found") || 
+    s.includes("pending") || 
     s.includes("accepted") || 
-    s.includes("driving") ||
+    s.includes("picking") ||
+    s.includes("delivering") ||
     s.includes("đang")
   ) {
     bgColor = "#E0F2FE";
@@ -104,6 +104,8 @@ const StatusBadge = ({ status, label }: { status: string; label: string }) => {
   );
 };
 
+// ... (các import khác giữ nguyên)
+
 const ActivityItem = ({ item }: { item: any }) => {
   const router = useRouter();
   const category = CATEGORIES[item.type] || CATEGORIES.ride;
@@ -111,7 +113,7 @@ const ActivityItem = ({ item }: { item: any }) => {
   const categoryColor = category.color;
 
   const handlePress = () => {
-    if (['ongoing', 'driver_found', 'accepted', 'driving'].includes(item.status)) {
+    if (['pending', 'accepted', 'picking', 'delivering'].includes(item.status)) {
       router.push(`/activity/tracking/${item.id}`);
     }
   };
@@ -124,22 +126,15 @@ const ActivityItem = ({ item }: { item: any }) => {
     >
       <View style={styles.cardHeader}>
         <View style={styles.headerLeft}>
-          <View
-            style={[
-              styles.iconContainer,
-              { backgroundColor: categoryColor + "15" },
-            ]}
-          >
-            <IconLib name={category.icon} size={22} color={categoryColor} />
+          <View style={[styles.iconContainer, { backgroundColor: `${categoryColor}15` }]}>
+            <IconLib name={category.icon} size={24} color={categoryColor} />
           </View>
           <View style={styles.titleContainer}>
             <Text style={styles.categoryLabel}>{category.label}</Text>
-            <Text style={styles.cardTitle} numberOfLines={1}>
-              {item.title}
-            </Text>
+            <Text style={styles.cardTitle}>{item.title}</Text>
           </View>
+          <Text style={styles.cardPrice}>{item.price}</Text>
         </View>
-        <Text style={styles.cardPrice}>{item.price}</Text>
       </View>
 
       <View style={styles.cardDivider} />
@@ -147,47 +142,35 @@ const ActivityItem = ({ item }: { item: any }) => {
       <View style={styles.routeContainer}>
         <View style={styles.routePoint}>
           <View style={styles.routeIndicator}>
-            <View
-              style={[styles.routeDot, { backgroundColor: categoryColor }]}
-            />
+            <View style={[styles.routeDot, { backgroundColor: categoryColor }]} />
             <View style={styles.routeLineDashed} />
           </View>
           <View style={styles.routeInfo}>
-            <Text style={styles.routeLabel}>Từ / Thông tin</Text>
-            <Text style={styles.routeText} numberOfLines={1}>
-              {item.from}
-            </Text>
+            <Text style={styles.routeLabel}>Điểm đón</Text>
+            <Text style={styles.routeText} numberOfLines={1}>{item.from}</Text>
           </View>
         </View>
-
-        <View style={[styles.routePoint, { marginTop: SPACING.xs }]}>
+        <View style={styles.routePoint}>
           <View style={styles.routeIndicator}>
-            <View
-              style={[styles.routeDot, { backgroundColor: COLORS.accent }]}
-            />
+            <View style={[styles.routeDot, { backgroundColor: COLORS.error }]} />
           </View>
           <View style={styles.routeInfo}>
-            <Text style={styles.routeLabel}>Đến / Chi tiết</Text>
-            <Text style={styles.routeText} numberOfLines={1}>
-              {item.to}
-            </Text>
+            <Text style={styles.routeLabel}>Điểm đến</Text>
+            <Text style={styles.routeText} numberOfLines={1}>{item.to}</Text>
           </View>
         </View>
       </View>
 
       <View style={styles.cardFooter}>
         <View style={styles.footerInfo}>
-          <Ionicons
-            name="calendar-outline"
-            size={14}
-            color={COLORS.textSecondary}
-          />
+          <Ionicons name="calendar-outline" size={14} color={COLORS.textSecondary} />
           <Text style={styles.footerDate}>{item.date}</Text>
         </View>
         <StatusBadge status={item.status} label={item.statusLabel} />
       </View>
 
-      {['ongoing', 'driver_found', 'accepted', 'driving'].includes(item.status) && (
+      {/* Nút theo dõi trực tiếp */}
+      {['pending', 'accepted', 'picking', 'delivering'].includes(item.status) && (
         <TouchableOpacity style={styles.trackButton} onPress={handlePress}>
           <Ionicons name="navigate" size={16} color={COLORS.white} />
           <Text style={trackButtonTextStyles.text}>Theo dõi trực tiếp</Text>
@@ -218,104 +201,138 @@ export default function ActivityScreen() {
 
   const fetchBookings = async () => {
     setLoading(true);
+    console.log('[ActivityScreen] Starting fetchBookings...');
     try {
       const token = Platform.OS === 'web' ? localStorage.getItem('access_token') : await SecureStore.getItemAsync('access_token');
       
-      console.log('[ActivityScreen] Fetching with token:', token ? 'Token exists' : 'Token is NULL');
-      console.log('[ActivityScreen] Fetching from:', 'https://admin.datxedulich.vip/api/customer/bookings/history');
-      
+      console.log('[ActivityScreen] Token used for fetch:', token ? 'Bearer ' + token.substring(0, 10) + '...' : 'NONE');
       if (!token) {
-        console.error('[ActivityScreen] No token found, aborting fetch.');
+        console.warn('[ActivityScreen] No token found. Skipping fetch.');
         return;
       }
 
       const response = await fetch('https://admin.datxedulich.vip/api/customer/bookings/history', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
+        method: 'GET',
+        headers: { 
+          'Authorization': `Bearer ${token}`, 
+          'Accept': 'application/json', 
+          'Content-Type': 'application/json' 
         },
       });
 
-      const responseText = await response.text();
-      console.log('[ActivityScreen] Raw Response:', responseText);
+      console.log('[ActivityScreen] Response status:', response.status);
+      const resData = await response.json();
+      console.log('[ActivityScreen] Raw API response:', resData);
 
-      if (!response.ok) {
-        console.error('[ActivityScreen] API error status:', response.status);
-        if (response.status === 401) {
-          console.error('[ActivityScreen] Token likely expired.');
-        }
-        return;
-      }
-
-      const resData = JSON.parse(responseText);
+      // Xử lý dữ liệu linh hoạt hơn
       const bookingsArray = Array.isArray(resData.data) ? resData.data : (Array.isArray(resData) ? resData : []);
-
-      if (bookingsArray.length > 0) {
-        const mapped = bookingsArray
-          .filter((b: any) => b && (b.id !== undefined || b.booking_id !== undefined))
-          .map((b: any) => ({
-            id: (b.id || b.booking_id || Math.random().toString()).toString(),
-            type: 'ride', 
-            title: b.vehicle_type?.name || 'Đặt xe',
-            date: b.created_at || '---',
-            from: b.pickup_address || '---',
-            to: b.dropoff_address || '---',
-            // Ensure status is always lowercase for consistent filtering
-            status: (b.status || b.status_text || 'unknown').toLowerCase(),
-            statusLabel: b.status_label || b.status_text || '---',
-            price: b.total_price ? new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(b.total_price) : '---'
-          }));
-        setBookings(mapped);
-      } else {
-        console.log('[ActivityScreen] No bookings found in response:', resData);
-      }
+      console.log('[ActivityScreen] Processed bookings array length:', bookingsArray.length);
+      
+      const mapped = bookingsArray
+        .map((b: any, index: number) => ({
+          id: (b.booking_id || b.id || `booking-${index}-${b.created_at || Date.now()}`).toString(),
+          type: 'ride', 
+          title: b.vehicle_type?.name || 'Đặt xe',
+          date: b.created_at || '---',
+          from: b.pickup_address || '---',
+          to: b.dropoff_address || '---',
+          status: (b.status || 'unknown').toLowerCase(),
+          statusLabel: b.status_label || b.status_text || '---',
+          price: b.total_price ? new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(b.total_price) : '---',
+          driver_phone: b.driver?.phone || null
+        }));
+      console.log('[ActivityScreen] Mapped bookings count:', mapped.length);
+      setBookings(mapped);
     } catch (e) { 
       console.error('[ActivityScreen] Error during fetch:', e); 
     }
     finally { setLoading(false); }
   };
 
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchBookings();
+    }, [])
+  );
+
   useEffect(() => {
-    fetchBookings(); // Load data on mount
-
     if (!user?.id) return;
-
+    
     const setupSocket = async () => {
-      await socketService.connect();
-      const socket = socketService.getSocket();
-      if (!socket) return;
+      const socket = await socketService.connect();
+      if (!socket) {
+        console.error('[Socket] Cannot connect to socket service!');
+        return;
+      }
+      
+      console.log('[Socket] Connected for ActivityScreen, User ID:', user.id);
+      
+      // Đăng ký kênh để nhận sự kiện private
+      const channelName = `private-customer.${user.id}`;
+      socket.emit('subscribe', { channel: channelName });
+      console.log(`[Socket] Subscribed to channel: ${channelName}`);
 
-      // Handle general booking updates
-      socket.on('booking_updated', (data: any) => {
-        console.log('[Socket] booking_updated:', data);
-        fetchBookings(); // Refresh list
+      const handleUpdate = async (eventName: string, data: any) => {
+        // Log dữ liệu nhận được chi tiết
+        console.log(`[Socket] Event ${eventName} received. Data:`, JSON.stringify(data));
+        
+        const payload = Array.isArray(data) ? data[0] : data;
+
+        // Nếu là sự kiện timeout, gọi fetchBookings để cập nhật lại danh sách từ server
+        if (eventName.includes('booking-search-timeout')) {
+          console.log('[Socket] Timeout event detected, refreshing bookings...');
+          fetchBookings();
+          return;
+        }
+
+        // Update local state bookings immediately
+        setBookings(prevBookings => {
+          const bookingId = payload?.booking_id || payload?.id;
+          if (bookingId) {
+            console.log('[Socket] Applying update for:', bookingId, 'New status:', payload.status);
+            return prevBookings.map(b => 
+              b.id == bookingId ? { 
+                ...b, 
+                status: (payload.status || b.status).toLowerCase(),
+                statusLabel: payload.message || b.statusLabel,
+                driver_phone: payload.driver?.phone || b.driver_phone 
+              } : b
+            );
+          }
+          return prevBookings;
+        });
+      };
+
+      // 2. Lắng nghe wildcard cho mọi event của user
+      const userChannelId = `private-customer.${user.id}`;
+      socket.offAny();
+      socket.onAny((event, data) => {
+         console.log(`[Socket] Received event: ${event}`);
+
+         // Kiểm tra nếu tên sự kiện chứa ID người dùng (vd: private-customer.12)
+         // Cách này bỏ qua các tiền tố lạ như 'laravel_database_'
+         if (event.includes(userChannelId)) {
+           console.log(`[Socket] Matched event: ${event}`);
+           handleUpdate(event, data);
+         }
       });
 
-      // Handle search timeout specifically using user ID
-      const eventName = `laravel_database_private-customer.${user.id}:booking-search-timeout`;
-      socket.on(eventName, (data: any) => {
-        console.log('[Socket] Received booking-search-timeout:', data);
-        fetchBookings(); // Refresh to show updated status
-      });
+      console.log('[Socket] Listeners registered.');
+
+      return () => {
+        socket.emit('unsubscribe', { channel: channelName });
+        socket.offAny();
+        console.log('[Socket] Listeners cleaned up.');
+      };
     };
 
     setupSocket();
-
-    return () => {
-      socketService.off('booking_updated');
-      const eventName = `laravel_database_private-customer.${user.id}:booking-search-timeout`;
-      socketService.off(eventName);
-    };
   }, [user?.id]);
 
   const filteredData = useMemo(() => {
     return bookings.filter((item) => {
-      // API returns 'status': 'accepted' for ongoing rides.
-      // Normalize to lowercase for reliable comparison.
       const status = item.status.toLowerCase(); 
-      const ongoingStatuses = ['ongoing', 'driver_found', 'accepted', 'driving', 'arrived'];
-      
+      const ongoingStatuses = ['pending', 'accepted', 'picking', 'delivering'];
       const isOngoing = ongoingStatuses.includes(status);
       
       const matchTab = activeTab === "all" || 
@@ -511,7 +528,7 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 14,
     justifyContent: "center",
-    alignItems: "center",
+    alignItems: 'center',
     marginRight: SPACING.md,
   },
   titleContainer: {
