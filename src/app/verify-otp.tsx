@@ -11,6 +11,7 @@ import { useToast } from '@/components/Toast';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import * as SecureStore from 'expo-secure-store';
+import { registerForPushNotifications } from '@/services/notificationService';
 
 export default function VerifyOTPScreen() {
   const router = useRouter();
@@ -39,6 +40,12 @@ export default function VerifyOTPScreen() {
 
     setLoading(true);
     try {
+      let fcmToken = '';
+      if (Platform.OS !== 'web') {
+        const token = await registerForPushNotifications();
+        if (token) fcmToken = token;
+      }
+
       const response = await fetch('https://admin.datxedulich.vip/api/auth/verify-otp', {
         method: 'POST',
         headers: {
@@ -46,7 +53,8 @@ export default function VerifyOTPScreen() {
         },
         body: JSON.stringify({ 
           phone: phone,
-          otp: otp 
+          otp: otp,
+          fcm_token: fcmToken,
         }),
       });
       

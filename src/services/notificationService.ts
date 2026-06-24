@@ -1,96 +1,53 @@
-import * as Notifications from 'expo-notifications';
-import * as SecureStore from 'expo-secure-store';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+let messaging: any = null;
+
+if (Platform.OS === 'android' || Platform.OS === 'ios') {
+  try {
+    messaging = require('@react-native-firebase/messaging').default;
+  } catch (e) {
+    console.warn('Firebase messaging not available:', e);
+  }
+}
 
 export async function registerForPushNotifications(): Promise<string | null> {
+  if (!messaging) return null;
+
   try {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
+    const authStatus = await messaging().requestPermission();
+    const enabled =
+      authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+      authStatus === messaging.AuthorizationStatus.PROVISIONAL;
 
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-
-    if (finalStatus !== 'granted') {
-      console.log('[Notifications] Permission not granted');
+    if (!enabled) {
+      console.log('Notification permission denied');
       return null;
     }
 
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'VanBooking',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#F97316',
-      });
-    }
-
-    const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: '72ea2de1-7e02-4960-8950-28bc27e6f0b2',
-    });
-
-    const pushToken = tokenData.data;
-    console.log('[Notifications] Push token:', pushToken);
-
-    if (Platform.OS === 'android') {
-      Notifications.setNotificationChannelAsync('default', {
-        name: 'VanBooking',
-        importance: Notifications.AndroidImportance.HIGH,
-      });
-    }
-
-    return pushToken;
-  } catch (e) {
-    console.log('[Notifications] Register error:', e);
+    const token = await messaging().getToken();
+    console.log('FCM Token:', token);
+    return token;
+  } catch (error) {
+    console.error('Error getting FCM token:', error);
     return null;
   }
 }
 
 export async function sendTokenToBackend(token: string): Promise<void> {
   try {
-    let accessToken = null;
-    if (Platform.OS === 'web') {
-      accessToken = localStorage.getItem('access_token');
-    } else {
-      accessToken = await SecureStore.getItemAsync('access_token');
-    }
-    if (!accessToken) return;
+    const SecureStore = require('expo-secure-store');
+    const authToken = await SecureStore.getItemAsync('access_token');
+    if (!authToken) return;
 
-    const res = await fetch('https://admin.datxedulich.vip/api/auth/update-fcm-token', {
+    await fetch('https://admin.datxedulich.vip/api/user/fcm-token', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
-        'Accept': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
       },
       body: JSON.stringify({ fcm_token: token }),
     });
-    const json = await res.json();
-    console.log('[Notifications] Send token response:', json);
-  } catch (e) {
-    console.log('[Notifications] Send token error:', e);
+  } catch (error) {
+    console.error('Error sending token to backend:', error);
   }
-}
-
-export function addNotificationListeners(
-  onReceived: (notification: Notifications.Notification) => void,
-  onTapped: (notification: Notifications.Notification) => void,
-): { sub1: Notifications.Subscription; sub2: Notifications.Subscription } {
-  const sub1 = Notifications.addNotificationReceivedListener(onReceived);
-  const sub2 = Notifications.addNotificationResponseReceivedListener(onTapped);
-  return { sub1, sub2 };
-}
-
-export function removeNotificationListeners(listeners: { sub1: Notifications.Subscription; sub2: Notifications.Subscription }) {
-  listeners.sub1.remove();
-  listeners.sub2.remove();
 }
