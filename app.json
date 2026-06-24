@@ -21,7 +21,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.anonymous.VanBookingApp",
+      "package": "android.appxe",
       "softwareKeyboardLayoutMode": "pan",
       "googleMapsApiKey": "AIzaSyAUg7qG4UpXMscCzcyXttGUOrjeM0GWXi4",
       "googleServicesFile": "./google-services.json",

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "427053383588",
+    "project_id": "app-xe-16",
+    "storage_bucket": "app-xe-16.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:427053383588:android:5d4638e8e3c40ebeb3cb31",
+        "android_client_info": {
+          "package_name": "android.appxe"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBuLnluWGTWpnrOE4ft0vAf-EgfJuD8HrM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
