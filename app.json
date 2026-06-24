@@ -42,12 +42,7 @@
       "expo-web-browser",
       "expo-secure-store",
       "expo-location",
-      [
-        "expo-notifications",
-        {
-          "sounds": ["./assets/sounds/notification.wav"]
-        }
-      ]
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true
