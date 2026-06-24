@@ -4,8 +4,8 @@ import { useCart } from "@/store/CartContext";
 import { useUser } from "@/store/UserContext";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
-import React, { useEffect } from "react";
+import { useRouter, useFocusEffect } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Dimensions,
   Image,
@@ -19,6 +19,7 @@ import {
   View,
   ActivityIndicator
 } from "react-native";
+import * as SecureStore from "expo-secure-store";
 
 const { width } = Dimensions.get("window");
 
@@ -81,7 +82,7 @@ const CATEGORIES = [
   },
 ];
 
-const HomeHeader = () => {
+const HomeHeader = ({ unreadCount }: { unreadCount: number }) => {
   const router = useRouter();
   const { user } = useUser();
 
@@ -126,7 +127,11 @@ const HomeHeader = () => {
                 onPress={() => router.push("/notifications")}
               >
                 <Ionicons name="notifications" size={22} color={COLORS.white} />
-                <View style={styles.notificationDot} />
+                {unreadCount > 0 && (
+                  <View style={styles.notifBadge}>
+                    <Text style={styles.notifBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                  </View>
+                )}
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.iconBtn, { marginLeft: 15 }]}
@@ -308,10 +313,38 @@ import FloatingCart from "@/components/FloatingCart";
 export default function HomeScreen() {
   const router = useRouter();
   const { fetchUserInfo, loading } = useUser();
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     fetchUserInfo();
   }, [fetchUserInfo]);
+
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      let token = null;
+      if (Platform.OS === 'web') {
+        token = localStorage.getItem('access_token');
+      } else {
+        token = await SecureStore.getItemAsync('access_token');
+      }
+      if (!token) return;
+      const res = await fetch('https://admin.datxedulich.vip/api/notifications', {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+      });
+      const json = await res.json();
+      const data = json?.data?.data || json?.data || [];
+      const count = Array.isArray(data) ? data.filter((n: any) => n.is_read === false || n.is_read === 0 || n.is_read === '0' || n.is_read === 'false').length : 0;
+      setUnreadCount(count);
+    } catch (e) {
+      console.log('Fetch unread count error:', e);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchUnreadCount();
+    }, [fetchUnreadCount])
+  );
 
   return (
     <View style={styles.container}>
@@ -325,7 +358,7 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        <HomeHeader />
+        <HomeHeader unreadCount={unreadCount} />
 
         {/* Categories Grid */}
         <View style={styles.categoriesContainer}>
@@ -429,16 +462,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  notificationDot: {
+  notifBadge: {
     position: "absolute",
-    top: 12,
-    right: 12,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: COLORS.accent,
+    top: 2,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#EF4444",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
     borderWidth: 2,
     borderColor: COLORS.primary,
+  },
+  notifBadgeText: {
+    fontSize: 9,
+    fontWeight: "900",
+    color: COLORS.white,
   },
   rewardCard: {
     flexDirection: "row",
