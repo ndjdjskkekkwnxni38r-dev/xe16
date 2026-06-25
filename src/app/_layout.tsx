@@ -2,7 +2,7 @@ import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
-import { ToastProvider } from '@/components/Toast';
+import { ToastProvider, useToast } from '@/components/Toast';
 import { CartProvider } from '@/store/CartContext';
 import { UserProvider } from '@/store/UserContext';
 import { NotificationProvider, useNotifications } from '@/store/NotificationContext';
@@ -16,6 +16,7 @@ if (Platform.OS !== 'web') {
 
 function FirebaseListener() {
   const { addNotification } = useNotifications();
+  const { showToast } = useToast();
   const listenerSet = useRef(false);
 
   useEffect(() => {
@@ -24,11 +25,10 @@ function FirebaseListener() {
 
     messaging().onMessage(async (remoteMessage: any) => {
       console.log('FCM foreground:', remoteMessage.notification?.title);
-      addNotification({
-        title: remoteMessage.notification?.title || 'Thông báo',
-        body: remoteMessage.notification?.body || '',
-        data: remoteMessage.data,
-      });
+      const title = remoteMessage.notification?.title || 'Thông báo';
+      const body = remoteMessage.notification?.body || '';
+      addNotification({ title, body, data: remoteMessage.data });
+      showToast({ message: `${title}\n${body}`, type: 'info' });
     });
 
     messaging().setBackgroundMessageHandler(async (remoteMessage: any) => {
