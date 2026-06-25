@@ -2,6 +2,7 @@ import { DANANG_SPOTS, PROMOTIONS } from "@/constants/data";
 import { COLORS, SHADOW } from "@/constants/theme";
 import { useCart } from "@/store/CartContext";
 import { useUser } from "@/store/UserContext";
+import { useNotifications } from "@/store/NotificationContext";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -313,38 +314,22 @@ import FloatingCart from "@/components/FloatingCart";
 export default function HomeScreen() {
   const router = useRouter();
   const { fetchUserInfo, loading } = useUser();
-  const [unreadCount, setUnreadCount] = useState(0);
+  const { unreadCount, refreshApi } = useNotifications();
 
   useEffect(() => {
     fetchUserInfo();
   }, [fetchUserInfo]);
 
-  const fetchUnreadCount = useCallback(async () => {
-    try {
-      let token = null;
-      if (Platform.OS === 'web') {
-        token = localStorage.getItem('access_token');
-      } else {
-        token = await SecureStore.getItemAsync('access_token');
-      }
-      if (!token) return;
-      const res = await fetch('https://admin.datxedulich.vip/api/notifications', {
-        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-      });
-      const json = await res.json();
-      const data = json?.data?.data || json?.data || [];
-      const count = Array.isArray(data) ? data.filter((n: any) => n.is_read === false || n.is_read === 0 || n.is_read === '0' || n.is_read === 'false').length : 0;
-      setUnreadCount(count);
-    } catch (e) {
-      console.log('Fetch unread count error:', e);
-    }
-  }, []);
-
   useFocusEffect(
     useCallback(() => {
-      fetchUnreadCount();
-    }, [fetchUnreadCount])
+      console.log('[HomeScreen] focused, calling refreshApi');
+      refreshApi();
+    }, [refreshApi])
   );
+
+  useEffect(() => {
+    console.log('[HomeScreen] unreadCount:', unreadCount);
+  }, [unreadCount]);
 
   return (
     <View style={styles.container}>

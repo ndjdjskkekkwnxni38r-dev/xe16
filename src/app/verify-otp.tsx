@@ -11,7 +11,7 @@ import { useToast } from '@/components/Toast';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import * as SecureStore from 'expo-secure-store';
-import { registerForPushNotifications } from '@/services/notificationService';
+import * as Notifications from 'expo-notifications';
 
 export default function VerifyOTPScreen() {
   const router = useRouter();
@@ -42,9 +42,18 @@ export default function VerifyOTPScreen() {
     try {
       let fcmToken = '';
       if (Platform.OS !== 'web') {
-        const token = await registerForPushNotifications();
-        if (token) fcmToken = token;
+        try {
+          const { status } = await Notifications.requestPermissionsAsync();
+          if (status === 'granted') {
+            const token = await Notifications.getDevicePushTokenAsync();
+            console.log('FCM Token result:', token.data);
+            fcmToken = token.data;
+          }
+        } catch (e) {
+          console.log('FCM Token error:', e);
+        }
       }
+      console.log('FCM Token sent:', fcmToken);
 
       const response = await fetch('https://admin.datxedulich.vip/api/auth/verify-otp', {
         method: 'POST',

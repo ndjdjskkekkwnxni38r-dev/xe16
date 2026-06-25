@@ -1,12 +1,43 @@
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { ToastProvider } from '@/components/Toast';
 import { CartProvider } from '@/store/CartContext';
 import { UserProvider } from '@/store/UserContext';
+import { NotificationProvider, useNotifications } from '@/store/NotificationContext';
 
 SplashScreen.preventAutoHideAsync();
+
+let messaging: any = null;
+if (Platform.OS !== 'web') {
+  try { messaging = require('@react-native-firebase/messaging').default; } catch {}
+}
+
+function FirebaseListener() {
+  const { addNotification } = useNotifications();
+  const listenerSet = useRef(false);
+
+  useEffect(() => {
+    if (!messaging || listenerSet.current) return;
+    listenerSet.current = true;
+
+    messaging().onMessage(async (remoteMessage: any) => {
+      console.log('FCM foreground:', remoteMessage.notification?.title);
+      addNotification({
+        title: remoteMessage.notification?.title || 'Thông báo',
+        body: remoteMessage.notification?.body || '',
+        data: remoteMessage.data,
+      });
+    });
+
+    messaging().setBackgroundMessageHandler(async (remoteMessage: any) => {
+      console.log('FCM background:', remoteMessage);
+    });
+  }, []);
+
+  return null;
+}
 
 export default function RootLayout() {
   const router = useRouter();
@@ -47,10 +78,12 @@ export default function RootLayout() {
       <ToastProvider>
         <UserProvider>
           <CartProvider>
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="send-otp" />
-              <Stack.Screen name="verify-otp" />
-            </Stack>
+            <NotificationProvider>
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="send-otp" />
+                <Stack.Screen name="verify-otp" />
+              </Stack>
+            </NotificationProvider>
           </CartProvider>
         </UserProvider>
       </ToastProvider>
@@ -61,11 +94,14 @@ export default function RootLayout() {
     <ToastProvider>
       <UserProvider>
         <CartProvider>
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="send-otp" />
-            <Stack.Screen name="verify-otp" />
-          </Stack>
+          <NotificationProvider>
+            <FirebaseListener />
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="send-otp" />
+              <Stack.Screen name="verify-otp" />
+            </Stack>
+          </NotificationProvider>
         </CartProvider>
       </UserProvider>
     </ToastProvider>

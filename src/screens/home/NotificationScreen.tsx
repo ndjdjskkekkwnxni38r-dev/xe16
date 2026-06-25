@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, SHADOW } from '@/constants/theme';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import { useNotifications, LocalNotification } from '@/store/NotificationContext';
 
 const getToken = async () =>
   Platform.OS === 'web'
@@ -47,7 +48,7 @@ const isRead = (val: any): boolean => {
   return false;
 };
 
-const NotificationItem = ({ item, onMarkRead }: { item: Notification; onMarkRead: (id: number) => void }) => {
+const NotificationItem = ({ item, onMarkRead }: { item: any; onMarkRead: (id: any) => void }) => {
   const icon = getIcon(item.type);
   const read = isRead(item.is_read);
   return (
@@ -95,37 +96,19 @@ const NotificationItem = ({ item, onMarkRead }: { item: Notification; onMarkRead
 };
 
 export default function NotificationScreen() {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const { mergedNotifications, unreadCount, apiLoading, markAsRead: markLocalRead, markAllRead: markLocalAllRead, refreshApi } = useNotifications();
 
-  const fetchNotifications = useCallback(async (isRefresh = false) => {
-    try {
-      const token = await getToken();
-      if (!token) { setLoading(false); setRefreshing(false); return; }
-      const res = await fetch('https://admin.datxedulich.vip/api/notifications', {
-        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-      });
-      const json = await res.json();
-      const data = json?.data?.data || json?.data || [];
-      setNotifications(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.log('Fetch notifications error:', e);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+  console.log('[NotificationScreen] merged:', mergedNotifications.length, 'unread:', unreadCount);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    fetchNotifications(true);
-  }, [fetchNotifications]);
+    await refreshApi();
+    setRefreshing(false);
+  }, [refreshApi]);
 
-  useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
-
-  const markAsRead = async (id: number) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+  const markAsRead = async (id: any) => {
+    markLocalRead(String(id));
     try {
       const token = await getToken();
       if (!token) return;
@@ -133,11 +116,11 @@ export default function NotificationScreen() {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
       });
-    } catch (e) { console.log(e); }
+    } catch (e) {}
   };
 
   const markAllAsRead = async () => {
-    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    markLocalAllRead();
     try {
       const token = await getToken();
       if (!token) return;
@@ -147,8 +130,6 @@ export default function NotificationScreen() {
       });
     } catch (e) { console.log(e); }
   };
-
-  const unreadCount = notifications.filter(n => !isRead(n.is_read)).length;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -181,7 +162,7 @@ export default function NotificationScreen() {
       </LinearGradient>
 
       <FlatList
-        data={notifications}
+        data={mergedNotifications}
         style={{ flex: 1 }}
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => (
@@ -202,7 +183,7 @@ export default function NotificationScreen() {
           unreadCount > 0 ? (
             <View style={styles.filterBar}>
               <View style={styles.filterActive}>
-                <Text style={styles.filterActiveText}>Tất cả ({notifications.length})</Text>
+                <Text style={styles.filterActiveText}>Tất cả ({mergedNotifications.length})</Text>
               </View>
               <View style={styles.filterInactive}>
                 <Text style={styles.filterInactiveText}>Chưa đọc ({unreadCount})</Text>
@@ -211,7 +192,11 @@ export default function NotificationScreen() {
           ) : null
         }
         ListEmptyComponent={
-          !loading ? (
+          apiLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={COLORS.primary} />
+            </View>
+          ) : (
             <View style={styles.emptyContainer}>
               <View style={styles.emptyCircle}>
                 <LinearGradient colors={['#E2E8F0', '#F1F5F9']} style={styles.emptyCircleInner}>
@@ -220,10 +205,6 @@ export default function NotificationScreen() {
               </View>
               <Text style={styles.emptyTitle}>Trống rỗng</Text>
               <Text style={styles.emptyDesc}>Chưa có thông báo nào{'\n'}Quay lại sau nhé!</Text>
-            </View>
-          ) : (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={COLORS.primary} />
             </View>
           )
         }
