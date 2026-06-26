@@ -1,11 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, FlatList, Platform, ActivityIndicator, StatusBar, RefreshControl } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { COLORS, SHADOW } from '@/constants/theme';
+import { useNotifications } from '@/store/NotificationContext';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS, SPACING, SHADOW } from '@/constants/theme';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import { useNotifications, LocalNotification } from '@/store/NotificationContext';
+import React, { useCallback, useState } from 'react';
+import { ActivityIndicator, Dimensions, FlatList, Platform, RefreshControl, SafeAreaView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+
+const { width } = Dimensions.get('window');
 
 const getToken = async () =>
   Platform.OS === 'web'
@@ -14,12 +16,12 @@ const getToken = async () =>
 
 const getIcon = (type: string) => {
   const t = type?.toLowerCase() || '';
-  if (t.includes('promo')) return { name: 'pricetag' as const, gradient: ['#F59E0B', '#D97706'] };
-  if (t.includes('booking')) return { name: 'car' as const, gradient: ['#F97316', '#EA580C'] };
-  if (t.includes('payment') || t.includes('wallet') || t.includes('refund')) return { name: 'wallet' as const, gradient: ['#8B5CF6', '#7C3AED'] };
-  if (t.includes('system') || t.includes('success') || t.includes('complete')) return { name: 'checkmark-circle' as const, gradient: ['#10B981', '#059669'] };
-  if (t.includes('cancel')) return { name: 'close-circle' as const, gradient: ['#EF4444', '#DC2626'] };
-  return { name: 'notifications' as const, gradient: ['#F97316', '#EA580C'] };
+  if (t.includes('promo')) return { name: 'pricetag' as const, gradient: ['#F59E0B', '#D97706'] as const };
+  if (t.includes('booking')) return { name: 'car' as const, gradient: ['#0EA5E9', '#0284C7'] as const };
+  if (t.includes('payment') || t.includes('wallet') || t.includes('refund')) return { name: 'wallet' as const, gradient: ['#8B5CF6', '#7C3AED'] as const };
+  if (t.includes('system') || t.includes('success') || t.includes('complete')) return { name: 'checkmark-circle' as const, gradient: ['#10B981', '#059669'] as const };
+  if (t.includes('cancel')) return { name: 'close-circle' as const, gradient: ['#EF4444', '#DC2626'] as const };
+  return { name: 'notifications' as const, gradient: ['#0EA5E9', '#0284C7'] as const };
 };
 
 const getRelativeTime = (dateStr: string) => {
@@ -33,20 +35,7 @@ const getRelativeTime = (dateStr: string) => {
   return new Date(dateStr).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
 };
 
-interface Notification {
-  id: number;
-  user_id: number;
-  title: string;
-  content: string;
-  type: string;
-  is_read: boolean | string | number;
-  created_at: string;
-}
-
-const isRead = (val: any): boolean => {
-  if (val === true || val === 1 || val === '1' || val === 'true') return true;
-  return false;
-};
+const isRead = (val: any): boolean => val === true || val === 1 || val === '1' || val === 'true';
 
 const NotificationItem = ({ item, onMarkRead }: { item: any; onMarkRead: (id: any) => void }) => {
   const icon = getIcon(item.type);
@@ -99,8 +88,6 @@ export default function NotificationScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const { mergedNotifications, unreadCount, apiLoading, markAsRead: markLocalRead, markAllRead: markLocalAllRead, refreshApi } = useNotifications();
 
-  console.log('[NotificationScreen] merged:', mergedNotifications.length, 'unread:', unreadCount);
-
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refreshApi();
@@ -128,13 +115,15 @@ export default function NotificationScreen() {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
       });
-    } catch (e) { console.log(e); }
+    } catch (e) {}
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
-      <LinearGradient colors={[COLORS.primary, '#0284C7']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
+      <LinearGradient colors={[COLORS.primary, '#0284C7']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
+        <MaterialCommunityIcons name="bus-side" size={180} color="rgba(255,255,255,0.06)" style={styles.bgIcon} />
+
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <Ionicons name="arrow-back" size={22} color="#FFF" />
@@ -220,8 +209,15 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingTop: Platform.OS === 'android' ? 40 : 10,
-    paddingBottom: 22,
+    paddingBottom: 24,
     paddingHorizontal: 20,
+    overflow: 'hidden',
+  },
+  bgIcon: {
+    position: 'absolute',
+    top: -20,
+    right: -40,
+    transform: [{ rotate: '15deg' }],
   },
   headerRow: {
     flexDirection: 'row',
@@ -286,14 +282,12 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.4)',
     marginLeft: 5,
   },
-
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#F8FAFC',
   },
-
   filterBar: {
     flexDirection: 'row',
     paddingHorizontal: 16,
@@ -313,7 +307,7 @@ const styles = StyleSheet.create({
     color: '#FFF',
   },
   filterInactive: {
-    backgroundColor: '#E2E8F0',
+    backgroundColor: '#FFF7ED',
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 20,
@@ -321,14 +315,12 @@ const styles = StyleSheet.create({
   filterInactiveText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#64748B',
+    color: '#EA580C',
   },
-
   listContent: {
     paddingBottom: 100,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: '#F8FAFC',
   },
-
   card: {
     marginHorizontal: 16,
     marginTop: 10,
@@ -442,7 +434,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 18,
     borderBottomLeftRadius: 18,
   },
-
   emptyContainer: {
     alignItems: 'center',
     paddingTop: 80,

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import * as Notifications from 'expo-notifications';
 
 export interface LocalNotification {
   id: string;
@@ -81,6 +82,12 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   const mergedNotifications = [...localMapped, ...apiNotifications];
   const unreadCount = mergedNotifications.filter((n: any) => !isRead(n.is_read)).length;
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      Notifications.setBadgeCountAsync(unreadCount);
+    }
+  }, [unreadCount]);
 
   if (apiNotifications.length > 0 || localMapped.length > 0) {
     console.log('[NotifCtx] localMapped:', localMapped.length, 'api:', apiNotifications.length, 'merged:', mergedNotifications.length);

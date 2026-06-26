@@ -151,6 +151,25 @@ export default function LiveTrackingScreen() {
     return () => { cleanupFn?.(); };
   }, [id, user?.id]);
 
+  const navigatedRef = React.useRef(false);
+
+  useEffect(() => {
+    if (tripStatus === 'completed' && !navigatedRef.current) {
+      navigatedRef.current = true;
+      console.log('[LiveTracking] Navigating to /rate with id:', id);
+      router.replace({
+        pathname: '/rate',
+        params: {
+          id: String(id),
+          driverName: driver?.name || '',
+          driverAvatar: driver?.avatar || '',
+          driverCar: driver?.car || '',
+          driverPlate: driver?.plate || '',
+        },
+      });
+    }
+  }, [tripStatus, driver]);
+
   const submitRate = async () => {
     if (rateRating === 0) return;
     setRateLoading(true);

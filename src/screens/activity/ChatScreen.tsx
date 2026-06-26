@@ -2,14 +2,17 @@ import { COLORS } from '@/constants/theme';
 import socketService from '@/services/socket';
 import { useUser } from '@/store/UserContext';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   InteractionManager,
   Keyboard,
+  Modal,
   Platform,
   StyleSheet,
   Text,
@@ -24,6 +27,8 @@ interface ChatMessage {
   sender_id: number;
   sender_type: string;
   message: string;
+  image?: string;
+  image_url?: string;
   created_at: string;
 }
 
@@ -39,12 +44,24 @@ export default function ChatScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [kbHeight, setKbHeight] = useState(0);
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [imageViewerUri, setImageViewerUri] = useState('');
+
+  const cursorRef = useRef<string | null>(null);
+  const loadingMoreRef = useRef(false);
+  const hasMoreRef = useRef(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+
+  const getToken = useCallback(async () => {
+    return Platform.OS === 'web'
+      ? localStorage.getItem('access_token')
+      : await SecureStore.getItemAsync('access_token');
+  }, []);
 
   const fetchMessages = useCallback(async () => {
     try {
-      const token = Platform.OS === 'web'
-        ? localStorage.getItem('access_token')
-        : await SecureStore.getItemAsync('access_token');
+      const token = await getToken();
       const response = await fetch(
         `https://admin.datxedulich.vip/api/chat/history/${bookingId}`,
         {
@@ -52,20 +69,102 @@ export default function ChatScreen() {
         }
       );
       const text = await response.text();
+      console.log('[Chat] Raw response:', text.substring(0, 500));
       if (response.ok && text.startsWith('{')) {
         const data = JSON.parse(text);
-        if (data.data) setMessages(data.data);
+        const msgs = data.data;
+        const cur = data.next_cursor;
+        const more = data.has_more;
+        console.log('[Chat] Parsed:', { msgsLength: msgs?.length, cursor: cur, has_more: more });
+        if (Array.isArray(msgs)) setMessages(msgs);
+        if (cur && more) {
+          cursorRef.current = cur;
+          hasMoreRef.current = true;
+          setHasMore(true);
+        } else {
+          cursorRef.current = null;
+          hasMoreRef.current = false;
+          setHasMore(false);
+        }
       }
     } catch (error) {
       console.error('[Chat] Fetch error:', error);
     } finally {
       setLoading(false);
     }
-  }, [bookingId]);
+  }, [bookingId, getToken]);
 
   useEffect(() => { fetchMessages(); }, [fetchMessages]);
 
+  const chatAreaHeight = useRef(0);
+  const autoLoadedRef = useRef(false);
+
+  const onChatAreaLayout = useCallback((e: any) => {
+    chatAreaHeight.current = e.nativeEvent.layout.height;
+  }, []);
+
+  useEffect(() => {
+    if (!loading && messages.length > 0 && !autoLoadedRef.current && chatAreaHeight.current > 0 && lastContentHeight.current < chatAreaHeight.current + 200) {
+      autoLoadedRef.current = true;
+      if (hasMoreRef.current && cursorRef.current) {
+        setTimeout(() => loadOlderMessages(), 200);
+      }
+    }
+  }, [loading, messages.length]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMoreRef.current || !cursorRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const token = await getToken();
+      const url = `https://admin.datxedulich.vip/api/chat/history/${bookingId}?cursor=${encodeURIComponent(cursorRef.current)}`;
+      const response = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+      });
+      const text = await response.text();
+      console.log('[Chat] LoadMore raw:', text.substring(0, 500));
+      if (response.ok && text.startsWith('{')) {
+        const data = JSON.parse(text);
+        const msgs = data.data;
+        const cur = data.next_cursor;
+        const more = data.has_more;
+        console.log('[Chat] LoadMore parsed:', { msgsLength: msgs?.length, cursor: cur, has_more: more });
+        if (Array.isArray(msgs) && msgs.length > 0) {
+          const prevOffset = scrollOffsetRef.current;
+          shouldScrollToBottom.current = false;
+          setMessages((prev) => [...msgs, ...prev]);
+          if (cur && more) {
+            cursorRef.current = cur;
+          } else {
+            cursorRef.current = null;
+            hasMoreRef.current = false;
+            setHasMore(false);
+          }
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              flatListRef.current?.scrollToOffset({ offset: prevOffset + 100, animated: false });
+              shouldScrollToBottom.current = true;
+            });
+          });
+        } else {
+          console.log('[Chat] LoadMore: no messages');
+          hasMoreRef.current = false;
+          setHasMore(false);
+          cursorRef.current = null;
+        }
+      }
+    } catch (error) {
+      console.error('[Chat] Load older error:', error);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [bookingId, getToken]);
+
   const lastContentHeight = useRef(0);
+  const scrollOffsetRef = useRef(0);
+  const shouldScrollToBottom = useRef(true);
 
   const doScroll = useCallback(() => {
     const list = flatListRef.current;
@@ -76,8 +175,14 @@ export default function ChatScreen() {
     });
   }, []);
 
+  const isInitialLoad = useRef(true);
+
   useEffect(() => {
-    doScroll();
+    if (messages.length > 0 && shouldScrollToBottom.current) {
+      const delay = isInitialLoad.current ? 200 : 100;
+      isInitialLoad.current = false;
+      setTimeout(doScroll, delay);
+    }
   }, [messages.length, doScroll]);
 
   useEffect(() => {
@@ -96,21 +201,14 @@ export default function ChatScreen() {
       const socket = await socketService.connect();
       if (!socket) return;
       const channelName = `private-chat.${bookingId}`;
-      const token = Platform.OS === 'web'
-        ? localStorage.getItem('access_token')
-        : await SecureStore.getItemAsync('access_token');
+      const token = await getToken();
 
       const trySubscribe = () => {
         socket.emit('subscribe', {
           channel: channelName,
           auth: { headers: { Authorization: `Bearer ${token}` } },
         });
-        console.log(`[Chat] Subscribed to: ${channelName}`);
       };
-
-      socket.once('subscribe:error', (err: any) => {
-        console.error(`[Chat] Subscribe error for ${channelName}:`, err);
-      });
 
       if (socket.connected) trySubscribe();
       else socket.once('connect', trySubscribe);
@@ -125,6 +223,8 @@ export default function ChatScreen() {
             if (Number(payload.sender_id) === Number(user?.id)) return prev;
             return [...prev, payload];
           });
+          setTimeout(doScroll, 100);
+          setTimeout(doScroll, 300);
         }
       };
       socket.onAny(handler);
@@ -136,20 +236,21 @@ export default function ChatScreen() {
     };
     setupSocket();
     return () => { cleanupFn?.(); };
-  }, [user?.id, bookingId]);
+  }, [user?.id, bookingId, getToken]);
 
   const sendMessage = async () => {
     const text = inputText.trim();
     if (!text || sending) return;
     setSending(true);
+    const savedText = inputText;
     setInputText('');
+
     try {
-      const token = Platform.OS === 'web'
-        ? localStorage.getItem('access_token')
-        : await SecureStore.getItemAsync('access_token');
+      const token = await getToken();
       const formData = new FormData();
       formData.append('booking_id', bookingId || '');
       formData.append('message', text);
+
       const response = await fetch('https://admin.datxedulich.vip/api/chat/send', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
@@ -164,13 +265,13 @@ export default function ChatScreen() {
           setTimeout(doScroll, 300);
           setTimeout(doScroll, 600);
         } else {
-          setInputText(text);
+          setInputText(savedText);
         }
       } catch (_) {
-        setInputText(text);
+        setInputText(savedText);
       }
     } catch (error) {
-      setInputText(text);
+      setInputText(savedText);
     } finally { setSending(false); }
   };
 
@@ -195,13 +296,19 @@ export default function ChatScreen() {
     return curr.toDateString() !== prev.toDateString();
   };
 
+  const getImageUrl = (uri: string) => {
+    if (uri.startsWith('http')) return uri;
+    return `https://admin.datxedulich.vip${uri.startsWith('/') ? '' : '/'}${uri}`;
+  };
+
   const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
-    const isMe = item.sender_type === 'customer' || item.sender_id === Number(user?.id);
+    const isMe = item.sender_type === 'customer' || Number(item.sender_id) === Number(user?.id);
     const prev = index > 0 ? messages[index - 1] : null;
-    const showTime = !prev || prev.sender_id !== item.sender_id ||
+    const showTime = !prev || Number(prev.sender_id) !== Number(item.sender_id) ||
       (new Date(item.created_at).getTime() - new Date(prev.created_at).getTime() > 300000);
     const showDate = shouldShowDateSeparator(index);
-    const isConsecutive = prev && prev.sender_id === item.sender_id && !showTime;
+    const isConsecutive = prev && Number(prev.sender_id) === Number(item.sender_id) && !showTime;
+    const hasImage = !!(item.image || item.image_url);
 
     return (
       <View key={item.id?.toString() || `msg-${index}`}>
@@ -212,8 +319,29 @@ export default function ChatScreen() {
         )}
         <View style={[styles.bubbleRow, isMe && styles.bubbleRowMe, isConsecutive && { marginTop: -2 }]}>
           <View style={[styles.bubbleWrapper, isMe && styles.bubbleWrapperMe]}>
-            <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleDriver]}>
-              <Text style={[styles.bubbleText, isMe && styles.bubbleTextMe]}>{item.message}</Text>
+            <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleDriver, hasImage && { padding: 4 }]}>
+              {hasImage ? (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    setImageViewerUri(getImageUrl(item.image || item.image_url!));
+                    setImageViewerVisible(true);
+                  }}
+                >
+                  <Image
+                    source={{ uri: getImageUrl(item.image || item.image_url) }}
+                    style={styles.chatImage}
+                    resizeMode="cover"
+                  />
+                  {item.message ? (
+                    <Text style={[styles.bubbleText, isMe && styles.bubbleTextMe, { padding: 8, paddingTop: 4 }]}>
+                      {item.message}
+                    </Text>
+                  ) : null}
+                </TouchableOpacity>
+              ) : (
+                <Text style={[styles.bubbleText, isMe && styles.bubbleTextMe]}>{item.message}</Text>
+              )}
             </View>
             {showTime && (
               <View style={[styles.timeRow, isMe && styles.timeRowMe]}>
@@ -231,9 +359,10 @@ export default function ChatScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={[styles.header, { paddingTop: insets.top }]}>
+      <LinearGradient colors={[COLORS.primary, '#0284C7']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.header, { paddingTop: insets.top }]}>
+        <Ionicons name="chatbubbles" size={160} color="rgba(255,255,255,0.06)" style={styles.bgIcon} />
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={22} color="#FFF" />
+          <Ionicons name="arrow-back" size={22} color="#FFF" />
         </TouchableOpacity>
         <View style={styles.avatarBox}>
           <Ionicons name="person" size={18} color="#FFF" />
@@ -246,9 +375,9 @@ export default function ChatScreen() {
         <TouchableOpacity style={styles.headerAction}>
           <Ionicons name="call-outline" size={20} color="#FFF" />
         </TouchableOpacity>
-      </View>
+      </LinearGradient>
 
-      <View style={styles.chatArea}>
+      <View style={styles.chatArea} onLayout={onChatAreaLayout}>
         {loading ? (
           <ActivityIndicator size="small" color={COLORS.primary} style={{ marginTop: 60 }} />
         ) : (
@@ -262,14 +391,32 @@ export default function ChatScreen() {
             initialNumToRender={50}
             maxToRenderPerBatch={50}
             windowSize={21}
-            onContentSizeChange={(_w, h) => {
-              if (h > lastContentHeight.current) {
-                doScroll();
+            onScroll={(e) => {
+              scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+              if (!hasMoreRef.current || loadingMoreRef.current || !cursorRef.current) return;
+              if (e.nativeEvent.contentOffset.y < 100) {
+                loadOlderMessages();
               }
+            }}
+            onScrollEndDrag={(e) => {
+              scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+              if (!hasMoreRef.current || loadingMoreRef.current || !cursorRef.current) return;
+              if (e.nativeEvent.contentOffset.y < 100) {
+                loadOlderMessages();
+              }
+            }}
+            onContentSizeChange={(_w, h) => {
               lastContentHeight.current = h;
             }}
             onScrollToIndexFailed={doScroll}
             keyboardShouldPersistTaps="handled"
+            ListHeaderComponent={
+              loadingMore ? (
+                <View style={{ paddingVertical: 12, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color={COLORS.primary} />
+                </View>
+              ) : null
+            }
             ListEmptyComponent={
               <View style={styles.emptyWrap}>
                 <View style={styles.emptyIcon}>
@@ -285,9 +432,6 @@ export default function ChatScreen() {
 
       <View style={[styles.inputBar, { bottom: inputBottom }]}>
         <View style={styles.inputWrap}>
-          <TouchableOpacity style={styles.attachBtn}>
-            <Ionicons name="add-circle" size={28} color={COLORS.primary} />
-          </TouchableOpacity>
           <TextInput
             style={styles.input}
             placeholder="Nhập tin nhắn..."
@@ -298,7 +442,7 @@ export default function ChatScreen() {
             maxLength={500}
           />
           <TouchableOpacity
-            style={[styles.sendBtn, { opacity: (!inputText.trim() || sending) ? 0.4 : 1 }]}
+            style={[styles.sendBtn, { opacity: !inputText.trim() || sending ? 0.4 : 1 }]}
             onPress={sendMessage}
             disabled={!inputText.trim() || sending}
             activeOpacity={0.7}
@@ -311,6 +455,17 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      <Modal visible={imageViewerVisible} transparent animationType="fade" onRequestClose={() => setImageViewerVisible(false)}>
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setImageViewerVisible(false)}
+        >
+          <Ionicons name="close" size={28} color="#FFF" style={styles.modalClose} />
+          <Image source={{ uri: imageViewerUri }} style={styles.modalImage} resizeMode="contain" />
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -321,14 +476,15 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingBottom: 10,
-    backgroundColor: COLORS.primary,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
+    paddingHorizontal: 12,
+    paddingBottom: 14,
+    overflow: 'hidden',
+  },
+  bgIcon: {
+    position: 'absolute',
+    right: -30,
+    top: -20,
+    transform: [{ rotate: '15deg' }],
   },
   backBtn: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
   avatarBox: {
@@ -373,6 +529,12 @@ const styles = StyleSheet.create({
   bubbleText: { fontSize: 14.5, color: '#111B21', lineHeight: 21 },
   bubbleTextMe: { color: '#111B21' },
 
+  chatImage: {
+    width: 220,
+    height: 220,
+    borderRadius: 6,
+  },
+
   timeRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, marginHorizontal: 4 },
   timeRowMe: { justifyContent: 'flex-end' },
   timeText: { fontSize: 11, color: '#667781', letterSpacing: 0.1 },
@@ -402,9 +564,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 8,
-    gap: 6,
+    gap: 2,
   },
-  attachBtn: { width: 36, height: 36, justifyContent: 'center', alignItems: 'center' },
   input: {
     flex: 1,
     backgroundColor: '#FFFFFF',
@@ -432,5 +593,22 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+  },
+  modalImage: {
+    width: '90%',
+    height: '80%',
   },
 });

@@ -1,5 +1,6 @@
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Notifications from 'expo-notifications';
 import { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { ToastProvider, useToast } from '@/components/Toast';
@@ -9,15 +10,30 @@ import { NotificationProvider, useNotifications } from '@/store/NotificationCont
 
 SplashScreen.preventAutoHideAsync();
 
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
+
 let messaging: any = null;
 if (Platform.OS !== 'web') {
   try { messaging = require('@react-native-firebase/messaging').default; } catch {}
+}
+
+if (messaging) {
+  messaging().setBackgroundMessageHandler(async (remoteMessage: any) => {
+    console.log('FCM background:', remoteMessage.notification?.title);
+  });
 }
 
 function FirebaseListener() {
   const { addNotification } = useNotifications();
   const { showToast } = useToast();
   const listenerSet = useRef(false);
+  const router = useRouter();
 
   useEffect(() => {
     if (!messaging || listenerSet.current) return;
@@ -29,11 +45,23 @@ function FirebaseListener() {
       const body = remoteMessage.notification?.body || '';
       addNotification({ title, body, data: remoteMessage.data });
       showToast({ message: `${title}\n${body}`, type: 'info' });
-    });
 
-    messaging().setBackgroundMessageHandler(async (remoteMessage: any) => {
-      console.log('FCM background:', remoteMessage);
+      await Notifications.scheduleNotificationAsync({
+        content: { title, body, data: remoteMessage.data, sound: true },
+        trigger: null,
+      });
     });
+  }, []);
+
+  useEffect(() => {
+    const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data;
+      console.log('Notification tapped:', data);
+      if (data?.screen) {
+        router.push(data.screen);
+      }
+    });
+    return () => responseSub.remove();
   }, []);
 
   return null;
@@ -68,7 +96,8 @@ export default function RootLayout() {
   if (!ready) {
     return (
       <View style={styles.center}>
-        <Text style={styles.text}>Loading...</Text>
+        <Text style={styles.logo}>VanBooking</Text>
+        <Text style={styles.subtitle}>Đang tải...</Text>
       </View>
     );
   }
@@ -100,6 +129,9 @@ export default function RootLayout() {
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="send-otp" />
               <Stack.Screen name="verify-otp" />
+              <Stack.Screen name="rate" />
+              <Stack.Screen name="rate-booking" />
+              <Stack.Screen name="chat" />
             </Stack>
           </NotificationProvider>
         </CartProvider>
@@ -109,6 +141,22 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FF0000' },
-  text: { fontSize: 24, color: '#FFFFFF', fontWeight: 'bold' },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+  },
+  logo: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#F97316',
+    letterSpacing: 1,
+  },
+  subtitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94A3B8',
+    marginTop: 10,
+  },
 });
