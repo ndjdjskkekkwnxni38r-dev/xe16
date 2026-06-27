@@ -1,229 +1,162 @@
-import FloatingCart from "@/components/FloatingCart";
-import { DANANG_SPOTS } from "@/constants/data";
-import { COLORS, SHADOW } from "@/constants/theme";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
-import React, { useMemo, useState } from "react";
+import FloatingCart from '@/components/FloatingCart';
+import { DANANG_SPOTS } from '@/constants/data';
+import { COLORS, SHADOW } from '@/constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
+import React, { useMemo, useState } from 'react';
 import {
-  Dimensions,
-  Image,
-  Modal,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
+  Dimensions, Image, Modal, Platform, ScrollView, StatusBar,
+  StyleSheet, Text, TextInput, TouchableOpacity, View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-const { width } = Dimensions.get("window");
+const { width } = Dimensions.get('window');
 
 const CATEGORIES = [
-  { id: "all", name: "Tất cả", icon: "ticket-outline" },
-  { id: "popular", name: "Phổ biến", icon: "star" },
-  { id: "nature", name: "Thiên nhiên", icon: "camera" },
-  { id: "food", name: "Ẩm thực", icon: "restaurant" },
+  { id: 'all', name: 'Tất cả', icon: 'grid' },
+  { id: 'popular', name: 'Phổ biến', icon: 'flame' },
+  { id: 'nature', name: 'Thiên nhiên', icon: 'leaf' },
+  { id: 'food', name: 'Ẩm thực', icon: 'restaurant' },
 ];
 
 const COLLECTIONS = [
-  {
-    id: "c1",
-    name: "Đà Nẵng về đêm",
-    count: 12,
-    img: "https://images.unsplash.com/photo-1559592442-7e182c9bd740?q=80&w=1000",
-  },
-  {
-    id: "c2",
-    name: "Tour Bà Nà Hills",
-    count: 8,
-    img: "https://cdn3.ivivu.com/2024/08/ba-na-hill-iVIVU1-e1724662224847.png",
-  },
-  {
-    id: "c3",
-    name: "Khám phá Sơn Trà",
-    count: 6,
-    img: "https://statics.vinpearl.com/ban-dao-son-tra-7_1629274214.jpg",
-  },
-  {
-    id: "c4",
-    name: "Ẩm thực Phố Cổ",
-    count: 15,
-    img: "https://bcp.cdnchinhphu.vn/334894974524682240/2025/9/18/cdhoian5-17581621538711341831070.jpeg",
-  },
-  {
-    id: "c5",
-    name: "Vẻ đẹp Ngũ Hành",
-    count: 5,
-    img: "https://statics.vinpearl.com/ngu-hanh-son-da-nang-1_1629452077.jpg",
-  },
+  { id: 'c1', name: 'Đà Nẵng về đêm', count: 12, img: 'https://images.unsplash.com/photo-1559592442-7e182c9bd740?q=80&w=1000' },
+  { id: 'c2', name: 'Tour Bà Nà Hills', count: 8, img: 'https://cdn3.ivivu.com/2024/08/ba-na-hill-iVIVU1-e1724662224847.png' },
+  { id: 'c3', name: 'Khám phá Sơn Trà', count: 6, img: 'https://statics.vinpearl.com/ban-dao-son-tra-7_1629274214.jpg' },
+  { id: 'c4', name: 'Ẩm thực Phố Cổ', count: 15, img: 'https://bcp.cdnchinhphu.vn/334894974524682240/2025/9/18/cdhoian5-17581621538711341831070.jpeg' },
+  { id: 'c5', name: 'Vẻ đẹp Ngũ Hành', count: 5, img: 'https://statics.vinpearl.com/ngu-hanh-son-da-nang-1_1629452077.jpg' },
 ];
 
 export default function AttractionsScreen() {
-  const [selectedCat, setSelectedCat] = useState("all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCat, setSelectedCat] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [filterModalVisible, setFilterModalVisible] = useState(false);
-  const [sortBy, setSortBy] = useState("popular"); // 'popular' | 'price_asc' | 'price_desc'
+  const [sortBy, setSortBy] = useState('popular');
 
   const filteredSpots = useMemo(() => {
-    let spots =
-      selectedCat === "all"
-        ? [...DANANG_SPOTS]
-        : DANANG_SPOTS.filter((spot) => spot.categoryId === selectedCat);
+    let spots = selectedCat === 'all'
+      ? [...DANANG_SPOTS]
+      : DANANG_SPOTS.filter((s) => s.categoryId === selectedCat);
 
-    if (searchQuery.trim() !== "") {
+    if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       spots = spots.filter(
-        (spot) =>
-          spot.name.toLowerCase().includes(q) ||
-          spot.location.toLowerCase().includes(q),
+        (s) => s.name.toLowerCase().includes(q) || s.location.toLowerCase().includes(q)
       );
     }
 
-    if (sortBy === "price_asc") {
-      spots.sort((a, b) => {
-        const priceA = parseInt(a.price.replace(/\D/g, "")) || 0;
-        const priceB = parseInt(b.price.replace(/\D/g, "")) || 0;
-        return priceA - priceB;
-      });
-    } else if (sortBy === "price_desc") {
-      spots.sort((a, b) => {
-        const priceA = parseInt(a.price.replace(/\D/g, "")) || 0;
-        const priceB = parseInt(b.price.replace(/\D/g, "")) || 0;
-        return priceB - priceA;
-      });
+    if (sortBy === 'price_asc') {
+      spots.sort((a, b) => (parseInt(a.price.replace(/\D/g, '')) || 0) - (parseInt(b.price.replace(/\D/g, '')) || 0));
+    } else if (sortBy === 'price_desc') {
+      spots.sort((a, b) => (parseInt(b.price.replace(/\D/g, '')) || 0) - (parseInt(a.price.replace(/\D/g, '')) || 0));
     }
 
     return spots;
   }, [selectedCat, searchQuery, sortBy]);
 
-  const handleSearchPress = () => {
-    // Gọi focus vào ô tìm kiếm hoặc thực hiện hành động khác khi bấm vào icon search
-    // Hiện tại ô tìm kiếm là live-search nên chỉ cần focus vào nó
-  };
-
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      <SafeAreaView style={styles.headerSafe}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            onPress={() => {
-              if (router.canGoBack()) {
-                router.back();
-              } else {
-                router.replace("/");
-              }
-            }}
-            style={styles.backBtn}
-          >
-            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-          </TouchableOpacity>
-          <View style={styles.searchBar}>
-            <TextInput
-              placeholder="Tìm hoạt động, địa điểm..."
-              style={styles.searchInput}
-              placeholderTextColor="#94A3B8"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              returnKeyType="search"
-            />
-          </View>
-          <TouchableOpacity
-            style={styles.mapBtn}
-            onPress={() => router.push("/(tabs)/explore")}
-          >
-            <Ionicons name="map" size={20} color={COLORS.primary} />
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+      {/* Header */}
+      <LinearGradient
+        colors={[COLORS.primary, '#0284C7']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
       >
-        {/* Flash Sale Banner */}
-        <TouchableOpacity
-          style={styles.flashSaleCard}
-          onPress={() => router.push("/attractions/flash-sale")}
-        >
+        <SafeAreaView>
+          <View style={styles.headerTop}>
+            <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={styles.backBtn}>
+              <Ionicons name="arrow-back" size={22} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.headerTitleWrap}>
+              <Ionicons name="compass" size={18} color="#fff" />
+              <Text style={styles.headerTitle}>Tham quan</Text>
+            </View>
+            <TouchableOpacity style={styles.mapBtn} onPress={() => router.push('/(tabs)/explore')}>
+              <Ionicons name="map" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
+        </SafeAreaView>
+      </LinearGradient>
+
+      <View style={styles.searchWrapOuter}>
+        <View style={styles.searchWrap}>
+          <Ionicons name="search" size={18} color="#94A3B8" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Tìm hoạt động, địa điểm..."
+            placeholderTextColor="#94A3B8"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={18} color="#94A3B8" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        {/* Flash Sale */}
+        <TouchableOpacity activeOpacity={0.85} onPress={() => router.push('/attractions/flash-sale')}>
           <LinearGradient
-            colors={["#F43F5E", "#E11D48"]}
+            colors={['#EF4444', '#DC2626']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
-            style={styles.flashSaleGradient}
+            style={styles.flashCard}
           >
-            <View style={styles.flashSaleInfo}>
-              <View style={styles.flashTitleRow}>
-                <Ionicons name="flash" size={18} color="#FACC15" />
-                <Text style={styles.flashSaleTitle}>
-                  Flash Sale Vé Tham Quan
-                </Text>
+            <View style={styles.flashLeft}>
+              <View style={styles.flashIconWrap}>
+                <Ionicons name="flash" size={20} color="#FACC15" />
               </View>
-              <Text style={styles.flashSaleTime}>
-                Kết thúc sau: 02 : 45 : 12
-              </Text>
+              <View>
+                <Text style={styles.flashTitle}>Flash Sale Vé Tham Quan</Text>
+                <Text style={styles.flashTime}>Kết thúc sau: 02:45:12</Text>
+              </View>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.white} />
+            <View style={styles.flashArrow}>
+              <Ionicons name="chevron-forward" size={18} color="#fff" />
+            </View>
           </LinearGradient>
         </TouchableOpacity>
 
         {/* Categories */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.catScroll}
-        >
-          {CATEGORIES.map((cat) => (
-            <TouchableOpacity
-              key={cat.id}
-              style={[
-                styles.catItem,
-                selectedCat === cat.id && styles.catItemActive,
-              ]}
-              onPress={() => setSelectedCat(cat.id)}
-            >
-              <Ionicons
-                name={cat.icon as any}
-                size={18}
-                color={selectedCat === cat.id ? COLORS.white : COLORS.primary}
-              />
-              <Text
-                style={[
-                  styles.catText,
-                  selectedCat === cat.id && styles.catTextActive,
-                ]}
-              >
-                {cat.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catScroll}>
+          {CATEGORIES.map((cat) => {
+            const isActive = selectedCat === cat.id;
+            return (
+              <TouchableOpacity key={cat.id} activeOpacity={0.7} onPress={() => setSelectedCat(cat.id)}>
+                <LinearGradient
+                  colors={isActive ? [COLORS.primary, '#0284C7'] : ['#F8FAFC', '#F1F5F9']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={[styles.catChip, isActive && styles.catChipActive]}
+                >
+                  <Ionicons name={cat.icon as any} size={16} color={isActive ? '#fff' : COLORS.primary} />
+                  <Text style={[styles.catLabel, isActive && styles.catLabelActive]}>{cat.name}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
 
         {/* Collections */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Bộ sưu tập nổi bật</Text>
+          <Text style={styles.sectionTitle}>Bộ sưu tập</Text>
+          <TouchableOpacity>
+            <Text style={styles.seeAll}>Xem thêm</Text>
+          </TouchableOpacity>
         </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.colScroll}
-        >
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.colScroll}>
           {COLLECTIONS.map((col) => (
-            <TouchableOpacity
-              key={col.id}
-              style={styles.colCard}
-              onPress={() => router.push(`/collection/${col.id}`)}
-            >
+            <TouchableOpacity key={col.id} activeOpacity={0.85} style={styles.colCard} onPress={() => router.push(`/collection/${col.id}`)}>
               <Image source={{ uri: col.img }} style={styles.colImg} />
-              <LinearGradient
-                colors={["transparent", "rgba(0,0,0,0.7)"]}
-                style={styles.colOverlay}
-              >
+              <LinearGradient colors={['transparent', 'rgba(0,0,0,0.65)']} style={styles.colOverlay}>
                 <Text style={styles.colName}>{col.name}</Text>
                 <Text style={styles.colCount}>{col.count} địa điểm</Text>
               </LinearGradient>
@@ -231,214 +164,114 @@ export default function AttractionsScreen() {
           ))}
         </ScrollView>
 
-        {/* Main List */}
+        {/* Spots List */}
         <View style={styles.sectionHeader}>
           <View>
             <Text style={styles.sectionTitle}>Hoạt động tại Đà Nẵng</Text>
-            <Text style={styles.sectionSubtitle}>
-              Gợi ý dựa trên xu hướng du lịch hiện nay
-            </Text>
+            <Text style={styles.sectionSub}>Gợi ý dựa trên xu hướng du lịch</Text>
           </View>
-          <TouchableOpacity
-            style={styles.filterChip}
-            onPress={() => setFilterModalVisible(true)}
-          >
+          <TouchableOpacity style={styles.filterChip} onPress={() => setFilterModalVisible(true)}>
             <Ionicons name="filter" size={14} color={COLORS.primary} />
-            <Text style={styles.filterChipText}>Lọc & Sắp xếp</Text>
+            <Text style={styles.filterChipText}>Lọc</Text>
           </TouchableOpacity>
         </View>
 
-        <View style={styles.spotsList}>
-          {filteredSpots.map((spot, index) => (
-            <Animated.View
-              key={spot.id}
-              entering={FadeInDown.delay(index * 100)}
-            >
-              <TouchableOpacity
-                style={styles.spotCard}
-                onPress={() => router.push(`/discover/${spot.id}`)}
-              >
-                <View style={styles.spotImgContainer}>
-                  <Image source={{ uri: spot.image }} style={styles.spotImg} />
-                  <View style={styles.tagBadge}>
-                    <Text style={styles.tagBadgeText}>
-                      THAM QUAN NHIỀU NHẤT
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.spotInfo}>
-                  <View>
-                    <Text style={styles.spotName} numberOfLines={1}>
-                      {spot.name}
-                    </Text>
-                    <View style={styles.spotLocRow}>
-                      <Ionicons name="location" size={12} color="#94A3B8" />
-                      <Text style={styles.spotLocText}>{spot.location}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.spotRatingRow}>
-                    <View style={styles.starGroup}>
-                      <Ionicons name="star" size={12} color="#FACC15" />
-                      <Text style={styles.ratingText}>4.9</Text>
-                    </View>
-                    <Text style={styles.soldText}>• 2k+ đã đặt</Text>
-                  </View>
-
-                  <View style={styles.spotFooter}>
-                    <View style={styles.priceContainer}>
-                      <Text style={styles.priceLabel}>Giá từ</Text>
-                      <Text style={styles.priceValue}>{spot.price}</Text>
-                    </View>
-                    <TouchableOpacity
-                      style={styles.addBtn}
-                      onPress={() => router.push(`/discover/${spot.id}`)}
-                    >
-                      <Ionicons
-                        name="chevron-forward"
-                        size={18}
-                        color={COLORS.white}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            </Animated.View>
-          ))}
-          {filteredSpots.length === 0 && (
-            <View style={{ alignItems: "center", marginTop: 40 }}>
-              <Text
-                style={{ color: "#94A3B8", fontSize: 16, fontWeight: "600" }}
-              >
-                Không tìm thấy địa điểm phù hợp
-              </Text>
+        {filteredSpots.map((spot) => (
+          <TouchableOpacity
+            key={spot.id}
+            activeOpacity={0.9}
+            style={styles.spotCard}
+            onPress={() => router.push(`/discover/${spot.id}`)}
+          >
+            <View style={styles.spotImgWrap}>
+              <Image source={{ uri: spot.image }} style={styles.spotImg} />
+              <View style={styles.spotBadge}>
+                <Text style={styles.spotBadgeText}>PHỔ BIẾN</Text>
+              </View>
             </View>
-          )}
-        </View>
+            <View style={styles.spotInfo}>
+              <Text style={styles.spotName} numberOfLines={1}>{spot.name}</Text>
+              <View style={styles.spotLocRow}>
+                <Ionicons name="location" size={11} color="#94A3B8" />
+                <Text style={styles.spotLoc} numberOfLines={1}>{spot.location}</Text>
+              </View>
+              <View style={styles.spotMeta}>
+                <View style={styles.spotRating}>
+                  <Ionicons name="star" size={12} color="#FACC15" />
+                  <Text style={styles.spotRatingText}>4.9</Text>
+                </View>
+                <Text style={styles.spotDot}>•</Text>
+                <Text style={styles.spotSold}>2k+ đã đặt</Text>
+              </View>
+              <View style={styles.spotFooter}>
+                <Text style={styles.spotPrice}>{spot.price}</Text>
+                <TouchableOpacity style={styles.spotBtn}>
+                  <Ionicons name="arrow-forward" size={16} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        ))}
+
+        {filteredSpots.length === 0 && (
+          <View style={styles.emptyWrap}>
+            <View style={styles.emptyIconWrap}>
+              <Ionicons name="search-outline" size={40} color="#CBD5E1" />
+            </View>
+            <Text style={styles.emptyTitle}>Không tìm thấy</Text>
+            <Text style={styles.emptyDesc}>Thử từ khóa khác nhé</Text>
+            <TouchableOpacity onPress={() => { setSelectedCat('all'); setSearchQuery(''); }}>
+              <LinearGradient colors={[COLORS.primary, '#0284C7']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.resetBtn}>
+                <Text style={styles.resetBtnText}>Xem tất cả</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
       <FloatingCart />
 
       {/* Filter Modal */}
-      <Modal
-        visible={filterModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setFilterModalVisible(false)}
-      >
-        <View style={styles.modalContainer}>
+      <Modal visible={filterModalVisible} transparent animationType="fade" onRequestClose={() => setFilterModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={styles.modalBg} activeOpacity={1} onPress={() => setFilterModalVisible(false)} />
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Lọc & Sắp xếp</Text>
-              <TouchableOpacity
-                onPress={() => setFilterModalVisible(false)}
-                style={styles.closeBtn}
-              >
-                <Ionicons name="close" size={24} color="#0F172A" />
+              <TouchableOpacity onPress={() => setFilterModalVisible(false)} style={styles.modalClose}>
+                <Ionicons name="close" size={20} color="#0F172A" />
               </TouchableOpacity>
             </View>
 
             <Text style={styles.filterSectionTitle}>Sắp xếp theo</Text>
 
-            <TouchableOpacity
-              style={[
-                styles.filterOption,
-                sortBy === "popular" && styles.filterOptionActive,
-              ]}
-              onPress={() => setSortBy("popular")}
-            >
-              <View style={styles.filterOptionContent}>
-                <Ionicons
-                  name="star"
-                  size={20}
-                  color={sortBy === "popular" ? COLORS.primary : "#64748B"}
-                />
-                <Text
-                  style={[
-                    styles.filterOptionText,
-                    sortBy === "popular" && styles.filterOptionTextActive,
-                  ]}
+            {[
+              { key: 'popular', icon: 'flame', label: 'Phổ biến nhất' },
+              { key: 'price_asc', icon: 'trending-up', label: 'Giá tăng dần' },
+              { key: 'price_desc', icon: 'trending-down', label: 'Giá giảm dần' },
+            ].map((opt) => {
+              const isActive = sortBy === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[styles.filterOpt, isActive && styles.filterOptActive]}
+                  onPress={() => setSortBy(opt.key)}
                 >
-                  Phổ biến nhất
-                </Text>
-              </View>
-              {sortBy === "popular" && (
-                <Ionicons
-                  name="checkmark-circle"
-                  size={24}
-                  color={COLORS.primary}
-                />
-              )}
-            </TouchableOpacity>
+                  <View style={styles.filterOptLeft}>
+                    <Ionicons name={opt.icon as any} size={18} color={isActive ? COLORS.primary : '#64748B'} />
+                    <Text style={[styles.filterOptText, isActive && styles.filterOptTextActive]}>{opt.label}</Text>
+                  </View>
+                  {isActive && <Ionicons name="checkmark-circle" size={20} color={COLORS.primary} />}
+                </TouchableOpacity>
+              );
+            })}
 
-            <TouchableOpacity
-              style={[
-                styles.filterOption,
-                sortBy === "price_asc" && styles.filterOptionActive,
-              ]}
-              onPress={() => setSortBy("price_asc")}
-            >
-              <View style={styles.filterOptionContent}>
-                <Ionicons
-                  name="arrow-up"
-                  size={20}
-                  color={sortBy === "price_asc" ? COLORS.primary : "#64748B"}
-                />
-                <Text
-                  style={[
-                    styles.filterOptionText,
-                    sortBy === "price_asc" && styles.filterOptionTextActive,
-                  ]}
-                >
-                  Giá tăng dần
-                </Text>
-              </View>
-              {sortBy === "price_asc" && (
-                <Ionicons
-                  name="checkmark-circle"
-                  size={24}
-                  color={COLORS.primary}
-                />
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.filterOption,
-                sortBy === "price_desc" && styles.filterOptionActive,
-              ]}
-              onPress={() => setSortBy("price_desc")}
-            >
-              <View style={styles.filterOptionContent}>
-                <Ionicons
-                  name="arrow-down"
-                  size={20}
-                  color={sortBy === "price_desc" ? COLORS.primary : "#64748B"}
-                />
-                <Text
-                  style={[
-                    styles.filterOptionText,
-                    sortBy === "price_desc" && styles.filterOptionTextActive,
-                  ]}
-                >
-                  Giá giảm dần
-                </Text>
-              </View>
-              {sortBy === "price_desc" && (
-                <Ionicons
-                  name="checkmark-circle"
-                  size={24}
-                  color={COLORS.primary}
-                />
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.applyBtn}
-              onPress={() => setFilterModalVisible(false)}
-            >
-              <Text style={styles.applyBtnText}>Áp dụng</Text>
+            <TouchableOpacity activeOpacity={0.8} onPress={() => setFilterModalVisible(false)}>
+              <LinearGradient colors={[COLORS.primary, '#0284C7']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.modalBtn}>
+                <Text style={styles.modalBtnText}>Áp dụng</Text>
+              </LinearGradient>
             </TouchableOpacity>
           </View>
         </View>
@@ -448,281 +281,144 @@ export default function AttractionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8FAFC" },
-  headerSafe: { backgroundColor: COLORS.white, ...SHADOW.sm, zIndex: 10 },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    gap: 12,
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  headerGradient: {
+    paddingTop: Platform.OS === 'android' ? 44 : 0,
+    paddingBottom: 16,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    ...SHADOW.lg,
   },
-  backBtn: { padding: 4 },
-  searchBar: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F1F5F9",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 44,
+  headerTop: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 12,
   },
-  searchInput: {
-    flex: 1,
-    marginLeft: 10,
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.text,
+  backBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center',
   },
+  headerTitleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerTitle: { fontSize: 18, fontWeight: '800', color: '#fff' },
   mapBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "#F0F9FF",
-    alignItems: "center",
-    justifyContent: "center",
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center',
   },
-  scrollContent: { paddingBottom: 20 },
-  flashSaleCard: {
-    marginHorizontal: 20,
-    marginTop: 20,
-    borderRadius: 15,
-    overflow: "hidden",
-    ...SHADOW.sm,
+  searchWrapOuter: { paddingHorizontal: 20, marginTop: -22, marginBottom: 8 },
+  searchWrap: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
+    paddingHorizontal: 16, height: 48, borderRadius: 14, ...SHADOW.sm,
   },
-  flashSaleGradient: {
-    padding: 15,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+  searchInput: { flex: 1, fontSize: 14, color: '#0F172A', fontWeight: '600', marginLeft: 10 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 20 },
+  // Flash Sale
+  flashCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: 16, borderRadius: 18, marginBottom: 20, ...SHADOW.md,
   },
-  flashSaleInfo: { flex: 1 },
-  flashTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  flashSaleTitle: { color: COLORS.white, fontWeight: "900", fontSize: 15 },
-  flashSaleTime: {
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 12,
-    marginTop: 4,
-    fontWeight: "700",
+  flashLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  flashIconWrap: {
+    width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  catScroll: { paddingHorizontal: 20, paddingVertical: 20 },
-  catItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: COLORS.white,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    marginRight: 12,
-    ...SHADOW.sm,
-    borderWidth: 1,
-    borderColor: "#F1F5F9",
+  flashTitle: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  flashTime: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '700', marginTop: 2 },
+  flashArrow: {
+    width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  catItemActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+  // Categories
+  catScroll: { paddingVertical: 16, gap: 10 },
+  catChip: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10,
+    borderRadius: 12, gap: 6, borderWidth: 1.5, borderColor: 'transparent',
   },
-  catText: { fontSize: 13, fontWeight: "700", color: "#64748B" },
-  catTextActive: { color: COLORS.white },
+  catChipActive: { borderColor: 'rgba(255,255,255,0.4)' },
+  catLabel: { fontSize: 13, fontWeight: '700', color: '#64748B' },
+  catLabelActive: { color: '#fff' },
+  // Section
   sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    paddingHorizontal: 25,
-    marginTop: 10,
-    marginBottom: 15,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 16,
   },
-  sectionTitle: { fontSize: 18, fontWeight: "900", color: "#0F172A" },
-  sectionSubtitle: {
-    fontSize: 12,
-    color: "#94A3B8",
-    marginTop: 4,
-    fontWeight: "500",
-  },
+  sectionTitle: { fontSize: 18, fontWeight: '900', color: '#0F172A' },
+  sectionSub: { fontSize: 12, color: '#94A3B8', fontWeight: '600', marginTop: 2 },
+  seeAll: { fontSize: 13, fontWeight: '700', color: COLORS.primary },
   filterChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#F0F9FF",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EFF6FF',
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10,
   },
-  filterChipText: { fontSize: 13, fontWeight: "700", color: COLORS.primary },
-  colScroll: { paddingLeft: 20, marginBottom: 25 },
-  colCard: {
-    width: 160,
-    height: 220,
-    marginRight: 15,
-    borderRadius: 20,
-    overflow: "hidden",
-    ...SHADOW.sm,
-  },
-  colImg: { width: "100%", height: "100%" },
+  filterChipText: { fontSize: 12, fontWeight: '700', color: COLORS.primary },
+  // Collections
+  colScroll: { gap: 14, marginBottom: 24 },
+  colCard: { width: 150, height: 200, borderRadius: 18, overflow: 'hidden' },
+  colImg: { width: '100%', height: '100%' },
   colOverlay: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 15,
-    height: 100,
-    justifyContent: "flex-end",
+    ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', padding: 14,
   },
-  colName: { color: COLORS.white, fontSize: 15, fontWeight: "900" },
-  colCount: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 11,
-    marginTop: 4,
-    fontWeight: "600",
-  },
-  spotsList: { paddingHorizontal: 20 },
+  colName: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  colCount: { color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: '600', marginTop: 2 },
+  // Spot Card
   spotCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: 24,
-    marginBottom: 20,
-    flexDirection: "row",
-    padding: 12,
-    ...SHADOW.sm,
-    borderWidth: 1,
-    borderColor: "#F1F5F9",
+    backgroundColor: '#fff', borderRadius: 20, marginBottom: 16,
+    overflow: 'hidden', borderWidth: 1, borderColor: '#F1F5F9', ...SHADOW.sm,
   },
-  spotImgContainer: {
-    width: 110,
-    height: 130,
-    borderRadius: 18,
-    overflow: "hidden",
+  spotImgWrap: { width: '100%', height: 180 },
+  spotImg: { width: '100%', height: '100%' },
+  spotBadge: {
+    position: 'absolute', top: 12, left: 12, backgroundColor: COLORS.primary,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
   },
-  spotImg: { width: "100%", height: "100%" },
-  tagBadge: {
-    position: "absolute",
-    top: 10,
-    left: 10,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3.84,
-    elevation: 5,
-    zIndex: 1,
-  },
-  tagBadgeText: {
-    color: COLORS.white,
-    fontSize: 9,
-    fontWeight: "800",
-    textAlign: "center",
-    lineHeight: 12,
-  },
-  spotInfo: {
-    flex: 1,
-    marginLeft: 15,
-    justifyContent: "space-between",
-    paddingVertical: 4,
-  },
-  spotName: { fontSize: 16, fontWeight: "900", color: "#1E293B" },
-  spotLocRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 4,
-  },
-  spotLocText: { fontSize: 11, color: "#94A3B8", fontWeight: "500" },
-  spotRatingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 8,
-  },
-  starGroup: { flexDirection: "row", alignItems: "center", gap: 4 },
-  ratingText: { fontSize: 12, fontWeight: "800", color: "#1E293B" },
-  soldText: { fontSize: 11, color: "#94A3B8", fontWeight: "500" },
+  spotBadgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
+  spotInfo: { padding: 16 },
+  spotName: { fontSize: 17, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
+  spotLocRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8 },
+  spotLoc: { fontSize: 12, color: '#64748B', fontWeight: '500', flex: 1 },
+  spotMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
+  spotRating: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  spotRatingText: { fontSize: 12, fontWeight: '800', color: '#0F172A' },
+  spotDot: { fontSize: 12, color: '#CBD5E1' },
+  spotSold: { fontSize: 11, color: '#94A3B8', fontWeight: '600' },
   spotFooter: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    marginTop: 10,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F1F5F9',
   },
-  priceContainer: { gap: 2 },
-  priceLabel: { fontSize: 10, color: "#94A3B8", fontWeight: "600" },
-  priceValue: { fontSize: 16, fontWeight: "900", color: COLORS.primary },
-  addBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: COLORS.primary,
-    alignItems: "center",
-    justifyContent: "center",
+  spotPrice: { fontSize: 18, fontWeight: '900', color: COLORS.primary },
+  spotBtn: {
+    width: 36, height: 36, borderRadius: 12, backgroundColor: COLORS.primary,
+    alignItems: 'center', justifyContent: 'center',
   },
-
-  // Modal Styles
-  modalContainer: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.6)",
-    justifyContent: "flex-end",
+  // Empty
+  emptyWrap: { alignItems: 'center', paddingVertical: 50 },
+  emptyIconWrap: {
+    width: 72, height: 72, borderRadius: 36, backgroundColor: '#F1F5F9',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 14,
   },
+  emptyTitle: { fontSize: 17, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
+  emptyDesc: { fontSize: 13, color: '#94A3B8', fontWeight: '500', marginBottom: 16 },
+  resetBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14 },
+  resetBtnText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  // Modal
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,23,42,0.5)' },
+  modalBg: { ...StyleSheet.absoluteFillObject },
   modalContent: {
-    backgroundColor: "#FFF",
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    padding: 24,
-    paddingBottom: Platform.OS === "ios" ? 40 : 24,
+    backgroundColor: '#fff', borderTopLeftRadius: 25, borderTopRightRadius: 25,
+    padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 24,
   },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 25,
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A' },
+  modalClose: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: '#F1F5F9',
+    alignItems: 'center', justifyContent: 'center',
   },
-  modalTitle: { fontSize: 20, fontWeight: "900", color: "#0F172A" },
-  closeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#F1F5F9",
-    alignItems: "center",
-    justifyContent: "center",
+  filterSectionTitle: { fontSize: 14, fontWeight: '800', color: '#0F172A', marginBottom: 12 },
+  filterOpt: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 14, paddingHorizontal: 16, borderRadius: 14, marginBottom: 8,
+    borderWidth: 1.5, borderColor: '#F1F5F9', backgroundColor: '#F8FAFC',
   },
-
-  filterSectionTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#1E293B",
-    marginBottom: 15,
-  },
-  filterOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 16,
-    marginBottom: 10,
-    borderWidth: 1.5,
-    borderColor: "#F1F5F9",
-    backgroundColor: "#F8FAFC",
-  },
-  filterOptionActive: { borderColor: "#BAE6FD", backgroundColor: "#F0F9FF" },
-  filterOptionContent: { flexDirection: "row", alignItems: "center", gap: 12 },
-  filterOptionText: { fontSize: 15, fontWeight: "600", color: "#64748B" },
-  filterOptionTextActive: { color: COLORS.primary, fontWeight: "800" },
-
-  applyBtn: {
-    backgroundColor: COLORS.primary,
-    padding: 18,
-    borderRadius: 16,
-    alignItems: "center",
-    ...SHADOW.sm,
-    marginTop: 15,
-  },
-  applyBtnText: {
-    color: "#FFF",
-    fontWeight: "800",
-    fontSize: 16,
-    letterSpacing: 0.5,
-  },
+  filterOptActive: { borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' },
+  filterOptLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  filterOptText: { fontSize: 14, fontWeight: '600', color: '#64748B' },
+  filterOptTextActive: { color: COLORS.primary, fontWeight: '800' },
+  modalBtn: { height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
+  modalBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
 });
