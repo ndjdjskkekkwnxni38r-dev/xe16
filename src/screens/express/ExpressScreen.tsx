@@ -395,6 +395,14 @@ export default function ExpressScreen() {
     if (!destination) {
       return;
     }
+    if (!receiverName.trim()) {
+      alert('Vui lòng nhập tên người nhận');
+      return;
+    }
+    if (!receiverPhone.trim()) {
+      alert('Vui lòng nhập số điện thoại người nhận');
+      return;
+    }
     setLoading(true);
     try {
       let dLat = dropoffCoords?.lat;
@@ -407,7 +415,7 @@ export default function ExpressScreen() {
           setDropoffCoords(coords);
         }
       }
-      const res = await deliveryService.findNearby({
+      const nearbyRes = await deliveryService.findNearby({
         pickup_address: pickup,
         dropoff_address: destination,
         pickup_lat: pickupCoords?.lat,
@@ -415,11 +423,35 @@ export default function ExpressScreen() {
         dropoff_lat: dLat,
         dropoff_lng: dLng,
       });
-      if (res.success) {
+
+      if (!nearbyRes.success || !nearbyRes.quote_id) {
+        alert(nearbyRes.message || 'Không tìm được tài xế nearby');
+        return;
+      }
+
+      console.log('[ExpressScreen] Creating order with quote_id:', nearbyRes.quote_id);
+      const createRes = await deliveryService.createOrder({
+        quote_id: nearbyRes.quote_id,
+        vehicle_type_id: selectedVehicle,
+        pickup_address: pickup,
+        dropoff_address: destination,
+        payment_method: 'wallet',
+        promo_code: selectedPromo?.code || null,
+        service_type: 'delivery',
+        delivery_type: deliveryType === 'instant' ? 'express' : 'standard',
+        recipient_name: receiverName.trim(),
+        recipient_phone: receiverPhone.trim(),
+        parcel_description: packageType.trim() || null,
+      });
+
+      console.log('[ExpressScreen] Create order response:', JSON.stringify(createRes));
+
+      if (createRes.success && createRes.data) {
         router.push({
           pathname: '/finding-driver',
           params: {
             orderType: 'delivery',
+            orderId: String(createRes.data.id),
             pickup: pickup,
             dropoff: destination,
             vehicle: String(selectedVehicle),
@@ -427,20 +459,11 @@ export default function ExpressScreen() {
           },
         });
       } else {
-        alert(res.message || 'Không tìm được tài xế nearby');
+        alert(createRes.message || 'Tạo đơn hàng thất bại');
       }
     } catch (error) {
-      console.error('Find nearby error:', error);
-      router.push({
-        pathname: '/finding-driver',
-        params: {
-          orderType: 'delivery',
-          pickup: pickup,
-          dropoff: destination,
-          vehicle: String(selectedVehicle),
-          price: String(totalPrice),
-        },
-      });
+      console.error('[ExpressScreen] Book error:', error);
+      alert('Đã xảy ra lỗi. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
