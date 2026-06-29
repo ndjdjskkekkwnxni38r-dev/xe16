@@ -50,6 +50,8 @@ function formatNominatimResult(item: any, inputHouse?: string): PlaceSuggestion 
       main_text: streetLine,
       secondary_text: secondary,
     },
+    lat: item.lat ? parseFloat(item.lat) : undefined,
+    lng: item.lon ? parseFloat(item.lon) : undefined,
   };
 }
 
@@ -59,6 +61,13 @@ async function fetchNominatim(text: string): Promise<PlaceSuggestion[]> {
   const queries = hasDanang ? [text] : [text, `${text}, Đà Nẵng`];
 
   for (const query of queries) {
+    const now = Date.now();
+    const timeSinceLastRequest = now - lastNominatimRequest;
+    if (timeSinceLastRequest < NOMINATIM_MIN_DELAY) {
+      await new Promise(resolve => setTimeout(resolve, NOMINATIM_MIN_DELAY - timeSinceLastRequest));
+    }
+    lastNominatimRequest = Date.now();
+
     const params = new URLSearchParams({
       q: query,
       format: 'json',
@@ -74,7 +83,9 @@ async function fetchNominatim(text: string): Promise<PlaceSuggestion[]> {
     });
     if (!res.ok) continue;
 
-    const data = await res.json();
+    const text = await res.text();
+    if (text.startsWith('<')) continue;
+    const data = JSON.parse(text);
     if (!Array.isArray(data) || data.length === 0) continue;
 
     return data.map((item: any) => formatNominatimResult(item, houseNumber));
@@ -107,6 +118,52 @@ export async function searchAddressSuggestions(text: string): Promise<PlaceSugge
   return merged;
 }
 
+/** Geocode text address to coordinates using same Nominatim search with rate limiting */
+export async function geocodeByText(text: string): Promise<{ latitude: number; longitude: number } | null> {
+  const trimmed = text.trim();
+  if (trimmed.length < 3) return null;
+
+  const normalizedAddress = trimmed.toLowerCase();
+  const cached = geocodeCache.get(normalizedAddress);
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    return cached.coords;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      q: trimmed,
+      format: 'json',
+      limit: '1',
+      countrycodes: 'vn',
+    });
+
+    const now = Date.now();
+    const timeSinceLastRequest = now - lastNominatimRequest;
+    if (timeSinceLastRequest < NOMINATIM_MIN_DELAY) {
+      await new Promise(resolve => setTimeout(resolve, NOMINATIM_MIN_DELAY - timeSinceLastRequest));
+    }
+    lastNominatimRequest = Date.now();
+
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+      headers: { 'User-Agent': 'VanBookingApp/2.0' },
+    });
+    if (!res.ok) return null;
+
+    const text = await res.text();
+    if (text.startsWith('<')) return null;
+    const data = JSON.parse(text);
+
+    if (Array.isArray(data) && data.length > 0) {
+      const coords = { latitude: parseFloat(data[0].lat), longitude: parseFloat(data[0].lon) };
+      geocodeCache.set(normalizedAddress, { coords, timestamp: Date.now() });
+      return coords;
+    }
+  } catch (e) {
+    console.warn('[geocodeByText] Error:', e);
+  }
+  return null;
+}
+
 /** Get place details including coordinates from place_id */
 export async function getPlaceDetails(placeId: string, addressText?: string): Promise<{ latitude: number; longitude: number } | null> {
   try {
@@ -137,24 +194,7 @@ export async function geocodeAddressFallback(address: string): Promise<{ latitud
 
     console.log('[geocodeAddressFallback] Geocoding:', address);
     
-    // Thử BigDataCloud trước (miễn phí, không cần key)
-    try {
-      const bdcResponse = await fetch(
-        `https://api.bigdatacloud.net/data/address-geocode?key=FREE&localityLanguage=vi&address=${encodeURIComponent(address)}`
-      );
-      if (bdcResponse.ok) {
-        const bdcData = await bdcResponse.json();
-        if (bdcData && bdcData.latitude && bdcData.longitude) {
-          const coords = { latitude: bdcData.latitude, longitude: bdcData.longitude };
-          geocodeCache.set(normalizedAddress, { coords, timestamp: Date.now() });
-          return coords;
-        }
-      }
-    } catch (bdcError) {
-      console.warn('[geocodeAddressFallback] BigDataCloud failed:', bdcError);
-    }
-    
-    // Fallback: Nominatim với rate limiting
+    // Rate limiting
     const now = Date.now();
     const timeSinceLastRequest = now - lastNominatimRequest;
     if (timeSinceLastRequest < NOMINATIM_MIN_DELAY) {
@@ -171,14 +211,18 @@ export async function geocodeAddressFallback(address: string): Promise<{ latitud
     });
 
     const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
-      headers: { 'User-Agent': 'VanBookingApp/1.0' },
+      headers: { 'User-Agent': 'VanBookingApp/2.0' },
     });
 
     if (!response.ok) {
       return null;
     }
 
-    const data = await response.json();
+    const text = await response.text();
+    if (text.startsWith('<')) {
+      return null;
+    }
+    const data = JSON.parse(text);
     
     if (!Array.isArray(data) || data.length === 0) {
       return null;

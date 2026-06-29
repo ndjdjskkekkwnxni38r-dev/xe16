@@ -1,17 +1,18 @@
-import { POPULAR_DESTINATIONS, PROMOTIONS, type PlaceSuggestion } from '@/constants/data';
+import { POPULAR_DESTINATIONS, type PlaceSuggestion } from '@/constants/data';
 import { COLORS, SHADOW } from '@/constants/theme';
-import { searchAddressSuggestions } from '@/services/addressSearch';
+import { searchAddressSuggestions, geocodeByText } from '@/services/addressSearch';
 import { deliveryService, type VehicleQuote } from '@/services/deliveryService';
+import { useToast } from '@/components/Toast';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { Search, X } from 'lucide-react-native';
+import * as SecureStore from 'expo-secure-store';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
-  Image,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -34,13 +35,18 @@ const formatMoney = (val: number) => Math.round(val).toLocaleString('vi-VN');
 export default function ExpressScreen() {
   console.log('[ExpressScreen] Component rendered');
   const insets = useSafeAreaInsets();
+  const { showToast } = useToast();
   const [selectedVehicle, setSelectedVehicle] = useState<number>(1);
-  const [deliveryType, setDeliveryType] = useState('instant');
+  const [deliveryType, setDeliveryType] = useState('economy');
   const [receiverName, setReceiverName] = useState('');
   const [receiverPhone, setReceiverPhone] = useState('');
   const [packageType, setPackageType] = useState('');
   const [isPromoModalVisible, setIsPromoModalVisible] = useState(false);
-  const [selectedPromo, setSelectedPromo] = useState<typeof PROMOTIONS[0] | null>(null);
+  const [promotions, setPromotions] = useState<any[]>([]);
+  const [selectedPromo, setSelectedPromo] = useState<any>(null);
+  const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+  const [selectedPayment, setSelectedPayment] = useState<any>(null);
+  const [isPaymentModalVisible, setIsPaymentModalVisible] = useState(false);
   const [pickup, setPickup] = useState('255 Hùng Vương, Đà Nẵng');
   const [destination, setDestination] = useState('');
   const [loading, setLoading] = useState(false);
@@ -70,20 +76,9 @@ export default function ExpressScreen() {
     : [];
 
   const geocodeAddress = async (address: string): Promise<{ lat: number; lng: number } | null> => {
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 5000);
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1&accept-language=vi`,
-        { headers: { 'User-Agent': 'VanBookingApp/1.0' }, signal: ctrl.signal }
-      );
-      clearTimeout(t);
-      const data = await res.json();
-      if (data?.length > 0) {
-        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-      }
-    } catch (e) {
-      console.error('[ExpressScreen] Geocode error:', e);
+    const result = await geocodeByText(address);
+    if (result) {
+      return { lat: result.latitude, lng: result.longitude };
     }
     return null;
   };
@@ -105,10 +100,12 @@ export default function ExpressScreen() {
           const t = setTimeout(() => ctrl.abort(), 3000);
           const res = await fetch(
             `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&addressdetails=1&accept-language=vi`,
-            { headers: { 'User-Agent': 'VanBookingApp/1.0' }, signal: ctrl.signal }
+            { headers: { 'User-Agent': 'VanBookingApp/2.0' }, signal: ctrl.signal }
           );
           clearTimeout(t);
-          const data = await res.json();
+          const text = await res.text();
+          if (text.startsWith('<')) return '';
+          const data = JSON.parse(text);
           if (data?.address) {
             const a = data.address;
             const houseNo = a.house_number || '';
@@ -132,7 +129,9 @@ export default function ExpressScreen() {
             signal: ctrl.signal,
           });
           clearTimeout(t);
-          const data = await res.json();
+          const text = await res.text();
+          if (text.startsWith('<')) return '';
+          const data = JSON.parse(text);
           if (data?.elements?.length > 0) {
             const tags = data.elements[0].tags || {};
             return [[tags['addr:housenumber'] || '', tags['addr:street'] || ''].filter(Boolean).join(' '), tags['addr:suburb'] || tags['addr:quarter'] || '', tags['addr:district'] || '', tags['addr:city'] || ''].filter(Boolean).join(', ');
@@ -172,6 +171,46 @@ export default function ExpressScreen() {
     })();
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        let token = null;
+        if (Platform.OS === 'web') {
+          token = localStorage.getItem('access_token');
+        } else {
+          token = await SecureStore.getItemAsync('access_token');
+        }
+        const headers: Record<string, string> = {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+        };
+
+        const payRes = await fetch('https://admin.datxedulich.vip/api/customer/payments', { headers });
+        const payData = await payRes.json();
+        if (payRes.ok && payData.data) {
+          setPaymentMethods(payData.data);
+          if (payData.data.length > 0) setSelectedPayment(payData.data[0]);
+        }
+
+        const promoRes = await fetch('https://admin.datxedulich.vip/api/customer/promotions/applicable', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        });
+        const promoData = await promoRes.json();
+        if (promoRes.ok && promoData.data) {
+          setPromotions(promoData.data);
+        }
+      } catch (e) {
+        console.error('[ExpressScreen] Failed to fetch payments/promos:', e);
+      }
+    })();
+  }, []);
+
   const getCurrentLocation = async () => {
     setLocationLoading(true);
     try {
@@ -184,10 +223,12 @@ export default function ExpressScreen() {
         const t = setTimeout(() => ctrl.abort(), 3000);
         const res = await fetch(
           `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&addressdetails=1&accept-language=vi`,
-          { headers: { 'User-Agent': 'VanBookingApp/1.0' }, signal: ctrl.signal }
+          { headers: { 'User-Agent': 'VanBookingApp/2.0' }, signal: ctrl.signal }
         );
         clearTimeout(t);
-        const data = await res.json();
+        const text = await res.text();
+        if (text.startsWith('<')) return '';
+        const data = JSON.parse(text);
         if (data?.address) {
           const a = data.address;
           return [[a.house_number || '', a.road || a.pedestrian || ''].filter(Boolean).join(' '), a.quarter || a.suburb || '', a.city_district || a.county || '', a.city || a.town || ''].filter(Boolean).join(', ');
@@ -206,7 +247,9 @@ export default function ExpressScreen() {
           signal: ctrl.signal,
         });
         clearTimeout(t);
-        const data = await res.json();
+        const text = await res.text();
+        if (text.startsWith('<')) return '';
+        const data = JSON.parse(text);
         if (data?.elements?.length > 0) {
           const tags = data.elements[0].tags || {};
           return [[tags['addr:housenumber'] || '', tags['addr:street'] || ''].filter(Boolean).join(' '), tags['addr:suburb'] || tags['addr:quarter'] || '', tags['addr:district'] || '', tags['addr:city'] || ''].filter(Boolean).join(', ');
@@ -283,8 +326,8 @@ export default function ExpressScreen() {
     }
   };
 
-  const fetchNearbyDrivers = useCallback(async (pickupAddr: string, dropoffAddr: string) => {
-    console.log('[ExpressScreen] fetchNearbyDrivers called', { pickupAddr, dropoffAddr, pickupCoords });
+  const fetchNearbyDrivers = useCallback(async (pickupAddr: string, dropoffAddr: string, dropoffCoordsParam?: { lat: number; lng: number } | null) => {
+    console.log('[ExpressScreen] fetchNearbyDrivers called', { pickupAddr, dropoffAddr, pickupCoords, dropoffCoordsParam });
     if (!pickupAddr.trim() || !dropoffAddr.trim()) {
       console.log('[ExpressScreen] fetchNearbyDrivers skipped - empty address');
       return;
@@ -300,14 +343,14 @@ export default function ExpressScreen() {
         setPickupCoords({ lat, lng });
       } catch (e) {
         console.error('[ExpressScreen] Cannot get location:', e);
-        alert('Không thể lấy vị trí hiện tại. Vui lòng bật GPS.');
+        showToast({ message: 'Không thể lấy vị trí hiện tại. Vui lòng bật GPS.', type: 'error' });
         return;
       }
     }
     setNearbyLoading(true);
     try {
-      let dLat = dropoffCoords?.lat;
-      let dLng = dropoffCoords?.lng;
+      let dLat = dropoffCoordsParam?.lat || dropoffCoords?.lat;
+      let dLng = dropoffCoordsParam?.lng || dropoffCoords?.lng;
       if (!dLat || !dLng) {
         console.log('[ExpressScreen] Geocoding dropoff address:', dropoffAddr);
         const coords = await geocodeAddress(dropoffAddr);
@@ -328,6 +371,8 @@ export default function ExpressScreen() {
         pickup_lng: lng,
         dropoff_lat: dLat,
         dropoff_lng: dLng,
+        service_type: 'delivery',
+        delivery_type: deliveryType,
       });
       console.log('[ExpressScreen] API response:', JSON.stringify(res, null, 2));
       if (res.success && res.data) {
@@ -352,7 +397,7 @@ export default function ExpressScreen() {
     } finally {
       setNearbyLoading(false);
     }
-  }, [pickupCoords]);
+  }, [pickupCoords, deliveryType]);
 
   const renderSuggestionItem = (item: PlaceSuggestion, icon: 'star' | 'location' = 'location') => (
     <TouchableOpacity
@@ -360,10 +405,15 @@ export default function ExpressScreen() {
       style={styles.suggestionItem}
       onPress={() => {
         setDestination(item.description);
+        const coords = item.lat && item.lng ? { lat: item.lat, lng: item.lng } : null;
+        if (coords) {
+          setDropoffCoords(coords);
+          console.log('[ExpressScreen] Coords from suggestion:', coords);
+        }
         setDestSuggestions([]);
         setDestFocused(false);
         Keyboard.dismiss();
-        fetchNearbyDrivers(pickup, item.description);
+        fetchNearbyDrivers(pickup, item.description, coords);
       }}
     >
       <Ionicons
@@ -391,16 +441,22 @@ export default function ExpressScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (pickup.trim() && destination.trim()) {
+      fetchNearbyDrivers(pickup, destination);
+    }
+  }, [deliveryType]);
+
   const handleBook = async () => {
     if (!destination) {
       return;
     }
     if (!receiverName.trim()) {
-      alert('Vui lòng nhập tên người nhận');
+      showToast({ message: 'Vui lòng nhập tên người nhận', type: 'error' });
       return;
     }
     if (!receiverPhone.trim()) {
-      alert('Vui lòng nhập số điện thoại người nhận');
+      showToast({ message: 'Vui lòng nhập số điện thoại người nhận', type: 'error' });
       return;
     }
     setLoading(true);
@@ -422,23 +478,25 @@ export default function ExpressScreen() {
         pickup_lng: pickupCoords?.lng,
         dropoff_lat: dLat,
         dropoff_lng: dLng,
+        service_type: 'delivery',
+        delivery_type: deliveryType,
       });
 
       if (!nearbyRes.success || !nearbyRes.quote_id) {
-        alert(nearbyRes.message || 'Không tìm được tài xế nearby');
+        showToast({ message: nearbyRes.message || 'Không tìm được tài xế nearby', type: 'error' });
         return;
       }
 
-      console.log('[ExpressScreen] Creating order with quote_id:', nearbyRes.quote_id);
+      console.log('[ExpressScreen] Creating order with quote_id:', nearbyRes.quote_id, 'vehicle_type_id:', selectedVehicle, 'typeof:', typeof selectedVehicle);
       const createRes = await deliveryService.createOrder({
         quote_id: nearbyRes.quote_id,
         vehicle_type_id: selectedVehicle,
         pickup_address: pickup,
         dropoff_address: destination,
-        payment_method: 'wallet',
+        payment_method: selectedPayment?.code || 'cash',
         promo_code: selectedPromo?.code || null,
         service_type: 'delivery',
-        delivery_type: deliveryType === 'instant' ? 'express' : 'standard',
+        delivery_type: deliveryType,
         recipient_name: receiverName.trim(),
         recipient_phone: receiverPhone.trim(),
         parcel_description: packageType.trim() || null,
@@ -446,12 +504,13 @@ export default function ExpressScreen() {
 
       console.log('[ExpressScreen] Create order response:', JSON.stringify(createRes));
 
-      if (createRes.success && createRes.data) {
+      if (createRes.success && (createRes.data || createRes.booking)) {
+        const order = createRes.data || createRes.booking;
         router.push({
           pathname: '/finding-driver',
           params: {
             orderType: 'delivery',
-            orderId: String(createRes.data.id),
+            orderId: String(order.id),
             pickup: pickup,
             dropoff: destination,
             vehicle: String(selectedVehicle),
@@ -459,11 +518,12 @@ export default function ExpressScreen() {
           },
         });
       } else {
-        alert(createRes.message || 'Tạo đơn hàng thất bại');
+        console.error('[ExpressScreen] Create order failed:', JSON.stringify(createRes));
+        showToast({ message: createRes.message || 'Tạo đơn hàng thất bại', type: 'error' });
       }
     } catch (error) {
       console.error('[ExpressScreen] Book error:', error);
-      alert('Đã xảy ra lỗi. Vui lòng thử lại.');
+      showToast({ message: 'Đã xảy ra lỗi. Vui lòng thử lại.', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -527,8 +587,9 @@ export default function ExpressScreen() {
         style={{ flex: 1 }}
       >
         <ScrollView
+          style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 36) + 120 }}
+          contentContainerStyle={{ paddingBottom: 160 }}
           keyboardShouldPersistTaps="always"
         >
           {/* Location Card - same as BookingScreen */}
@@ -645,7 +706,7 @@ export default function ExpressScreen() {
                     <View style={styles.suggestionBox}>
                       <ScrollView
                         style={styles.suggestionScroll}
-                        contentContainerStyle={{ paddingBottom: 20 }}
+          contentContainerStyle={{ paddingBottom: 160 }}
                         nestedScrollEnabled={true}
                         keyboardShouldPersistTaps="always"
                         showsVerticalScrollIndicator={true}
@@ -660,11 +721,18 @@ export default function ExpressScreen() {
                             <TouchableOpacity
                               style={styles.suggestionItem}
                               onPress={() => {
+                                const firstSuggestion = destSuggestions[0];
+                                const coords = firstSuggestion?.lat && firstSuggestion?.lng
+                                  ? { lat: firstSuggestion.lat, lng: firstSuggestion.lng }
+                                  : null;
+                                if (coords) {
+                                  setDropoffCoords(coords);
+                                }
                                 setDestination(destination);
                                 setDestSuggestions([]);
                                 setDestFocused(false);
                                 Keyboard.dismiss();
-                                fetchNearbyDrivers(pickup, destination);
+                                fetchNearbyDrivers(pickup, destination, coords);
                               }}
                             >
                               <Ionicons name="pin-outline" size={14} color={COLORS.primary} style={{ marginRight: 8 }} />
@@ -833,25 +901,35 @@ export default function ExpressScreen() {
           <View style={styles.speedRow}>
             <TouchableOpacity
               activeOpacity={0.7}
-              style={[styles.speedCard, deliveryType === 'instant' && styles.speedCardActive]}
-              onPress={() => setDeliveryType('instant')}
+              style={[styles.speedCard, deliveryType === 'express' && styles.speedCardActive]}
+              onPress={() => setDeliveryType('express')}
             >
-              <View style={[styles.speedIconWrap, deliveryType === 'instant' && styles.speedIconWrapActive]}>
-                <Ionicons name="flash" size={20} color={deliveryType === 'instant' ? '#fff' : COLORS.primary} />
+              {deliveryType === 'express' && (
+                <View style={styles.speedCheckBadge}>
+                  <Ionicons name="checkmark" size={12} color="#fff" />
+                </View>
+              )}
+              <View style={[styles.speedIconWrap, deliveryType === 'express' && styles.speedIconWrapActive]}>
+                <Ionicons name="flash" size={22} color={deliveryType === 'express' ? '#fff' : COLORS.primary} />
               </View>
-              <Text style={[styles.speedLabel, deliveryType === 'instant' && styles.speedLabelActive]}>Siêu tốc</Text>
-              <Text style={styles.speedDesc}>Nhận ngay</Text>
+              <Text style={[styles.speedLabel, deliveryType === 'express' && styles.speedLabelActive]}>Siêu tốc</Text>
+              <Text style={[styles.speedDesc, deliveryType === 'express' && styles.speedDescActive]}>Nhận ngay</Text>
             </TouchableOpacity>
             <TouchableOpacity
               activeOpacity={0.7}
-              style={[styles.speedCard, deliveryType === 'standard' && styles.speedCardActive]}
-              onPress={() => setDeliveryType('standard')}
+              style={[styles.speedCard, deliveryType === 'economy' && styles.speedCardActive]}
+              onPress={() => setDeliveryType('economy')}
             >
-              <View style={[styles.speedIconWrap, deliveryType === 'standard' && styles.speedIconWrapActive]}>
-                <Ionicons name="time" size={20} color={deliveryType === 'standard' ? '#fff' : COLORS.primary} />
+              {deliveryType === 'economy' && (
+                <View style={styles.speedCheckBadge}>
+                  <Ionicons name="checkmark" size={12} color="#fff" />
+                </View>
+              )}
+              <View style={[styles.speedIconWrap, deliveryType === 'economy' && styles.speedIconWrapActive]}>
+                <Ionicons name="time" size={22} color={deliveryType === 'economy' ? '#fff' : COLORS.primary} />
               </View>
-              <Text style={[styles.speedLabel, deliveryType === 'standard' && styles.speedLabelActive]}>Tiết kiệm</Text>
-              <Text style={styles.speedDesc}>2-4 giờ</Text>
+              <Text style={[styles.speedLabel, deliveryType === 'economy' && styles.speedLabelActive]}>Tiết kiệm</Text>
+              <Text style={[styles.speedDesc, deliveryType === 'economy' && styles.speedDescActive]}>2-4 giờ</Text>
             </TouchableOpacity>
           </View>
 
@@ -861,92 +939,179 @@ export default function ExpressScreen() {
             <Text style={styles.securityText}>Đơn hàng được bảo hiểm 100%</Text>
           </View>
         </ScrollView>
+
       </KeyboardAvoidingView>
 
       {/* Footer */}
-      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) + 8 }]}>
-        <View style={styles.footerInner}>
-          <View style={styles.footerPrice}>
-            <View>
-              <Text style={styles.totalLabel}>Tổng cộng</Text>
-              <View style={styles.priceRow}>
-                {discount > 0 && <Text style={styles.oldPrice}>{formatMoney(selectedQuote?.estimated_price || 0)}đ</Text>}
-                <Text style={styles.totalPrice}>{formatMoney(totalPrice)}đ</Text>
+      <View style={styles.footer}>
+          <View style={styles.footerInner}>
+            <View style={styles.priceSection}>
+              <View>
+                <Text style={styles.totalLabel}>Tổng cộng</Text>
+                <View style={styles.priceRow}>
+                  {discount > 0 && <Text style={styles.oldPrice}>{formatMoney(selectedQuote?.estimated_price || 0)}đ</Text>}
+                  <Text style={styles.totalPrice}>{formatMoney(totalPrice)}đ</Text>
+                </View>
               </View>
             </View>
-            <TouchableOpacity
-              style={[styles.promoBtn, selectedPromo && styles.promoBtnSelected]}
-              onPress={() => setIsPromoModalVisible(true)}
-            >
-              <Ionicons name="pricetag" size={14} color={selectedPromo ? '#fff' : COLORS.primary} />
-              <Text style={[styles.promoBtnText, selectedPromo && { color: '#fff' }]}>
-                {selectedPromo ? selectedPromo.code : 'Ưu đãi'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity activeOpacity={0.8} onPress={handleBook} disabled={loading}>
-            <LinearGradient
-              colors={[COLORS.primary, '#0284C7']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={[styles.bookBtn, loading && { opacity: 0.6 }]}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Text style={styles.bookBtnText}>Xác nhận & Tìm tài xế</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#fff" />
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
-      </View>
 
-      {/* Promo Modal */}
-      <Modal visible={isPromoModalVisible} transparent animationType="fade" onRequestClose={() => setIsPromoModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={styles.modalBg} activeOpacity={1} onPress={() => setIsPromoModalVisible(false)} />
-          <Animated.View entering={SlideInDown} style={styles.promoModal}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Ưu đãi dành cho bạn</Text>
-              <TouchableOpacity onPress={() => setIsPromoModalVisible(false)} style={styles.modalCloseBtn}>
-                <Ionicons name="close" size={22} color="#64748B" />
+            <View style={styles.quickOptionsRow}>
+              <TouchableOpacity
+                style={styles.paymentPill}
+                onPress={() => setIsPaymentModalVisible(true)}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.pillIconBox, { backgroundColor: '#FFF' }]}>
+                  <Ionicons
+                    name={selectedPayment?.code === 'wallet' ? 'wallet' : 'card'}
+                    size={16}
+                    color={COLORS.primary}
+                  />
+                </View>
+                <Text style={styles.pillLabel} numberOfLines={1}>
+                  {selectedPayment?.name || 'Tiền mặt'}
+                </Text>
+                <Ionicons name="chevron-down" size={14} color="#666" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.promoPill, selectedPromo && styles.promoPillActive]}
+                onPress={() => setIsPromoModalVisible(true)}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name="gift"
+                  size={16}
+                  color={selectedPromo ? '#fff' : COLORS.primary}
+                />
+                <Text style={[styles.pillLabel, selectedPromo && { color: '#fff' }]} numberOfLines={1}>
+                  {selectedPromo ? selectedPromo.code : 'Ưu đãi'}
+                </Text>
+                <View style={styles.promoDot} />
               </TouchableOpacity>
             </View>
-            <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled style={{ flex: 1 }}>
-              {PROMOTIONS.filter(p => p.type === 'Di chuyển' || p.type === 'Giao hàng').map((promo) => (
+
+            <TouchableOpacity
+              style={[styles.bookBtn, loading && { opacity: 0.6 }]}
+              onPress={handleBook}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              <LinearGradient
+                colors={[COLORS.primary, '#0284C7']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.bookBtnGradient}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Text style={styles.bookBtnText}>Xác nhận & Tìm tài xế</Text>
+                    <Ionicons name="chevron-forward" size={20} color="#fff" />
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+      </View>
+
+      {/* Promotion Selection Modal */}
+      <Modal
+        visible={isPromoModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setIsPromoModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Chọn mã giảm giá</Text>
+              <TouchableOpacity onPress={() => setIsPromoModalVisible(false)}>
+                <Ionicons name="close" size={24} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {promotions.length > 0 ? promotions.map((item) => (
                 <TouchableOpacity
-                  key={promo.id}
-                  style={[styles.promoCard, selectedPromo?.id === promo.id && styles.promoCardSelected]}
-                  onPress={() => { setSelectedPromo(selectedPromo?.id === promo.id ? null : promo); setIsPromoModalVisible(false); }}
+                  key={item.id}
+                  style={[styles.selectionItem, selectedPromo?.id === item.id && styles.selectionItemActive]}
+                  onPress={() => {
+                    setSelectedPromo(item);
+                    setIsPromoModalVisible(false);
+                  }}
                 >
-                  <View style={styles.promoImgWrap}>
-                    <Image source={{ uri: promo.image }} style={styles.promoImg} />
+                  <View style={styles.promoIconBox}>
+                    <Ionicons name="ticket" size={24} color={COLORS.primary} />
                   </View>
-                  <View style={styles.promoInfo}>
-                    <Text style={styles.promoName} numberOfLines={1}>{promo.title}</Text>
-                    <Text style={styles.promoDesc} numberOfLines={1}>{promo.subtitle}</Text>
-                    <View style={styles.promoMeta}>
-                      <Text style={styles.promoExpiry}>{promo.expiry}</Text>
-                      <View style={styles.promoCodeBadge}>
-                        <Text style={styles.promoCodeText}>{promo.code}</Text>
-                      </View>
-                    </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.selectionName}>{item.name || item.code}</Text>
+                    <Text style={styles.selectionDesc}>{item.description || `Giảm giá cho chuyến đi của bạn`}</Text>
                   </View>
-                  {selectedPromo?.id === promo.id && (
-                    <View style={styles.promoCheck}>
-                      <Ionicons name="checkmark" size={14} color="#fff" />
-                    </View>
+                  {selectedPromo?.id === item.id && (
+                    <Ionicons name="checkmark-circle" size={24} color={COLORS.primary} />
+                  )}
+                </TouchableOpacity>
+              )) : (
+                <View style={{ padding: 40, alignItems: 'center' }}>
+                  <Ionicons name="receipt-outline" size={48} color="#E0E0E0" />
+                  <Text style={{ marginTop: 10, color: '#9E9E9E' }}>Không có mã giảm giá khả dụng</Text>
+                </View>
+              )}
+              {selectedPromo && (
+                <TouchableOpacity
+                  style={{ marginTop: 10, alignItems: 'center', padding: 10 }}
+                  onPress={() => {
+                    setSelectedPromo(null);
+                    setIsPromoModalVisible(false);
+                  }}
+                >
+                  <Text style={{ color: COLORS.error, fontWeight: '600' }}>Bỏ chọn mã giảm giá</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Payment Selection Modal */}
+      <Modal visible={isPaymentModalVisible} transparent={true} animationType="slide" onRequestClose={() => setIsPaymentModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Phương thức thanh toán</Text>
+              <TouchableOpacity onPress={() => setIsPaymentModalVisible(false)}>
+                <Ionicons name="close" size={24} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {paymentMethods.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.selectionItem, selectedPayment?.id === item.id && styles.selectionItemActive]}
+                  onPress={() => {
+                    setSelectedPayment(item);
+                    setIsPaymentModalVisible(false);
+                  }}
+                >
+                  <Ionicons
+                    name={item.code === 'wallet' ? 'wallet-outline' : 'cash-outline'}
+                    size={24}
+                    color={selectedPayment?.id === item.id ? COLORS.primary : COLORS.text}
+                  />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={[styles.selectionName, selectedPayment?.id === item.id && { color: COLORS.primary }]}>
+                      {item.name}
+                    </Text>
+                    <Text style={styles.selectionDesc}>{item.description || 'Thanh toán khi hoàn thành chuyến đi'}</Text>
+                  </View>
+                  {selectedPayment?.id === item.id && (
+                    <Ionicons name="checkmark-circle" size={24} color={COLORS.primary} />
                   )}
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <TouchableOpacity style={styles.promoDoneBtn} onPress={() => setIsPromoModalVisible(false)}>
-              <Text style={styles.promoDoneText}>Xong</Text>
-            </TouchableOpacity>
-          </Animated.View>
+          </View>
         </View>
       </Modal>
     </View>
@@ -1184,20 +1349,27 @@ const styles = StyleSheet.create({
   formDivider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 12 },
 
   /* Speed */
-  speedRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 12 },
+  speedRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 12, marginBottom: 20 },
   speedCard: {
-    flex: 1, backgroundColor: '#fff', borderRadius: 16, padding: 16,
+    flex: 1, backgroundColor: '#fff', borderRadius: 18, padding: 18,
     alignItems: 'center', borderWidth: 2, borderColor: '#F1F5F9', ...SHADOW.sm,
+    position: 'relative',
   },
-  speedCardActive: { borderColor: COLORS.primary, backgroundColor: '#FFF7ED' },
+  speedCardActive: { borderColor: COLORS.primary, backgroundColor: '#FFF7ED', ...SHADOW.md },
+  speedCheckBadge: {
+    position: 'absolute', top: 10, right: 10,
+    width: 20, height: 20, borderRadius: 10,
+    backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center',
+  },
   speedIconWrap: {
-    width: 44, height: 44, borderRadius: 14, backgroundColor: '#FFF7ED',
+    width: 48, height: 48, borderRadius: 16, backgroundColor: '#FFF7ED',
     alignItems: 'center', justifyContent: 'center', marginBottom: 10,
   },
   speedIconWrapActive: { backgroundColor: COLORS.primary },
-  speedLabel: { fontSize: 14, fontWeight: '800', color: '#0F172A' },
+  speedLabel: { fontSize: 15, fontWeight: '800', color: '#0F172A' },
   speedLabelActive: { color: COLORS.primary },
-  speedDesc: { fontSize: 12, color: '#94A3B8', marginTop: 2, fontWeight: '500' },
+  speedDesc: { fontSize: 12, color: '#94A3B8', marginTop: 4, fontWeight: '500' },
+  speedDescActive: { color: COLORS.primary, fontWeight: '600' },
 
   /* Security */
   securityBanner: {
@@ -1209,68 +1381,160 @@ const styles = StyleSheet.create({
 
   /* Footer */
   footer: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#fff', ...SHADOW.lg,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    ...SHADOW.lg,
+    shadowOpacity: 0.1,
+    paddingBottom: Platform.OS === 'ios' ? 25 : 15,
   },
-  footerInner: { padding: 16, paddingTop: 12 },
-  footerPrice: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14,
+  footerInner: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  priceSection: {
+    marginBottom: 16,
   },
   priceRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  oldPrice: { fontSize: 13, color: '#94A3B8', textDecorationLine: 'line-through', fontWeight: '600' },
-  totalLabel: { fontSize: 11, color: '#94A3B8', fontWeight: '700', textTransform: 'uppercase' },
-  totalPrice: { fontSize: 22, fontWeight: '900', color: '#0F172A' },
-  promoBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: '#FFF7ED', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10,
-    borderWidth: 1, borderColor: COLORS.primary + '30',
+  oldPrice: {
+    fontSize: 14, color: '#94A3B8', textDecorationLine: 'line-through',
+    fontWeight: '600',
   },
-  promoBtnSelected: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  promoBtnText: { fontSize: 12, color: COLORS.primary, fontWeight: '700' },
+  totalLabel: { fontSize: 12, color: '#64748B', fontWeight: '700', textTransform: 'uppercase' },
+  totalPrice: { fontSize: 24, fontWeight: '900', color: '#0F172A' },
+  quickOptionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    gap: 12,
+  },
+  paymentPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    paddingLeft: 8,
+    paddingRight: 16,
+    paddingVertical: 8,
+    borderRadius: 100,
+    flex: 1.2,
+    height: 48,
+  },
+  promoPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    paddingHorizontal: 16,
+    borderRadius: 100,
+    flex: 1,
+    height: 48,
+    borderWidth: 1.5,
+    borderColor: '#F3F4F6',
+  },
+  promoPillActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  pillIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    backgroundColor: COLORS.white,
+    ...SHADOW.sm,
+  },
+  pillLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.text,
+    flex: 1,
+    marginRight: 4,
+  },
+  promoDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.primary,
+  },
   bookBtn: {
-    height: 54, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    height: 56,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
-  bookBtnText: { fontSize: 15, fontWeight: '800', color: '#fff', marginRight: 6 },
+  bookBtnGradient: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bookBtnText: { fontSize: 16, fontWeight: '900', color: '#fff', marginRight: 8 },
 
   /* Modal */
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalBg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  promoModal: {
-    backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    padding: 20, maxHeight: height * 0.7,
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 40,
+    padding: 28,
+    paddingBottom: Platform.OS === 'ios' ? 45 : 35,
+    maxHeight: height * 0.85,
   },
   modalHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: 16, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 30,
   },
-  modalTitle: { fontSize: 17, fontWeight: '800', color: '#0F172A' },
-  modalCloseBtn: {
-    width: 32, height: 32, borderRadius: 16, backgroundColor: '#F1F5F9',
-    alignItems: 'center', justifyContent: 'center',
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: COLORS.text,
+    letterSpacing: -0.5,
+  },
+  selectionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    borderRadius: 24,
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#F9FAFB',
+    backgroundColor: '#F9FAFB',
+  },
+  selectionItemActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary + '08',
+  },
+  selectionName: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  selectionDesc: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginTop: 4,
+    lineHeight: 20,
+    fontWeight: '500',
   },
 
-  /* Promo */
-  promoCard: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
-    borderRadius: 16, padding: 12, marginBottom: 10, borderWidth: 2, borderColor: '#F1F5F9', ...SHADOW.sm,
+  /* Promo Modal */
+  promoIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#F0F9FF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  promoCardSelected: { borderColor: COLORS.primary, backgroundColor: '#FFF7ED' },
-  promoImgWrap: { width: 64, height: 64, borderRadius: 14, overflow: 'hidden' },
-  promoImg: { width: '100%', height: '100%' },
-  promoInfo: { flex: 1, marginLeft: 14 },
-  promoName: { fontSize: 14, fontWeight: '800', color: '#0F172A' },
-  promoDesc: { fontSize: 12, color: '#64748B', marginTop: 2 },
-  promoMeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
-  promoExpiry: { fontSize: 11, color: COLORS.error, fontWeight: '700' },
-  promoCodeBadge: { backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  promoCodeText: { fontSize: 10, fontWeight: '800', color: '#0F172A' },
-  promoCheck: {
-    width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.primary,
-    alignItems: 'center', justifyContent: 'center', marginLeft: 10,
-  },
-  promoDoneBtn: {
-    backgroundColor: COLORS.primary, height: 50, borderRadius: 14,
-    alignItems: 'center', justifyContent: 'center', marginTop: 14,
-  },
-  promoDoneText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+
 });

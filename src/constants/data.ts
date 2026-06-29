@@ -725,6 +725,8 @@ export type PlaceSuggestion = {
   place_id: string;
   description: string;
   structured_formatting: { main_text: string; secondary_text: string };
+  lat?: number;
+  lng?: number;
 };
 
 /** Điểm đến phổ biến — gợi ý nhanh trong màn đặt xe */

@@ -3,6 +3,7 @@ import { COLORS, SHADOW } from "@/constants/theme";
 import { useCart } from "@/store/CartContext";
 import { useUser } from "@/store/UserContext";
 import { useNotifications } from "@/store/NotificationContext";
+import socketService from "@/services/socket";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -313,7 +314,7 @@ import FloatingCart from "@/components/FloatingCart";
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { fetchUserInfo, loading } = useUser();
+  const { user, fetchUserInfo, loading } = useUser();
   const { unreadCount, refreshApi } = useNotifications();
 
   useEffect(() => {
@@ -330,6 +331,45 @@ export default function HomeScreen() {
   useEffect(() => {
     console.log('[HomeScreen] unreadCount:', unreadCount);
   }, [unreadCount]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const setupDepositSocket = async () => {
+      if (!user?.id) return;
+
+      try {
+        const socket = await socketService.connect();
+        if (!socket || !mounted) return;
+
+        const channelName = `private-customer.${user.id}`;
+        socket.emit('subscribe', { channel: channelName });
+        console.log('[HomeScreen] Subscribed to channel:', channelName);
+
+        const handleEvent = (event: string, data: any) => {
+          console.log('[HomeScreen] Socket event:', event, data);
+          if (event.includes('deposit.status.updated')) {
+            console.log('[HomeScreen] Deposit status updated, refreshing user info...');
+            fetchUserInfo();
+          }
+        };
+
+        socket.onAny(handleEvent);
+
+        return () => {
+          socket.offAny(handleEvent);
+        };
+      } catch (e) {
+        console.error('[HomeScreen] Socket setup error:', e);
+      }
+    };
+
+    setupDepositSocket();
+
+    return () => {
+      mounted = false;
+    };
+  }, [user?.id, fetchUserInfo]);
 
   return (
     <View style={styles.container}>

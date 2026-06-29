@@ -38,6 +38,14 @@ export interface DeliveryOrderResponse {
     vehicle_type?: string;
     price?: number;
   };
+  booking?: {
+    id: number | string;
+    booking_code?: string;
+    status: string;
+    pickup_address?: string;
+    dropoff_address?: string;
+    final_price?: number;
+  };
 }
 
 export const deliveryService = {
@@ -48,11 +56,15 @@ export const deliveryService = {
     pickup_lng?: number;
     dropoff_lat?: number;
     dropoff_lng?: number;
+    service_type?: string;
+    delivery_type?: string;
   }): Promise<DeliveryNearbyResponse> {
     console.log('[deliveryService] findNearby called with:', JSON.stringify(params));
     const token = await getToken();
     console.log('[deliveryService] Token:', token ? 'EXISTS' : 'NULL');
-    const url = `${API_BASE}/customer/delivery/nearby`;
+    const { service_type, ...bodyParams } = params;
+    const queryParams = service_type ? `?service_type=${encodeURIComponent(service_type)}` : '';
+    const url = `${API_BASE}/customer/delivery/nearby${queryParams}`;
     console.log('[deliveryService] POST', url);
     const response = await fetch(url, {
       method: 'POST',
@@ -61,7 +73,7 @@ export const deliveryService = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
-      body: JSON.stringify(params),
+      body: JSON.stringify({ ...bodyParams, service_type }),
     });
     console.log('[deliveryService] Response status:', response.status, response.statusText);
     const text = await response.text();
