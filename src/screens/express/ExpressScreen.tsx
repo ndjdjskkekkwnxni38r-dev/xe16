@@ -1,15 +1,15 @@
-import { useToast } from '@/components/Toast';
 import { POPULAR_DESTINATIONS, type PlaceSuggestion } from '@/constants/data';
 import { COLORS, SHADOW } from '@/constants/theme';
-import { geocodeByText, searchAddressSuggestions } from '@/services/addressSearch';
+import { searchAddressSuggestions, geocodeByText } from '@/services/addressSearch';
 import { deliveryService, type VehicleQuote } from '@/services/deliveryService';
+import { useToast } from '@/components/Toast';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
 import { Search, X } from 'lucide-react-native';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import * as SecureStore from 'expo-secure-store';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -25,7 +25,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown, SlideInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
@@ -33,7 +33,6 @@ const { width, height } = Dimensions.get('window');
 const formatMoney = (val: number) => Math.round(val).toLocaleString('vi-VN');
 
 export default function ExpressScreen() {
-  console.log('[ExpressScreen] Component rendered');
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
   const [selectedVehicle, setSelectedVehicle] = useState<number>(1);
@@ -44,15 +43,35 @@ export default function ExpressScreen() {
   const [isPromoModalVisible, setIsPromoModalVisible] = useState(false);
   const [promotions, setPromotions] = useState<any[]>([]);
   const [selectedPromo, setSelectedPromo] = useState<any>(null);
+  
+  // Debug: log when selectedPromo changes
+  useEffect(() => {
+    console.log('[ExpressScreen] >>> SELECTED PROMO CHANGED <<<', selectedPromo?.code);
+  }, [selectedPromo]);
+  
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
   const [selectedPayment, setSelectedPayment] = useState<any>(null);
   const [isPaymentModalVisible, setIsPaymentModalVisible] = useState(false);
+  const [walletBalance, setWalletBalance] = useState<number>(0);
   const [pickup, setPickup] = useState('255 Hùng Vương, Đà Nẵng');
   const [destination, setDestination] = useState('');
   const [loading, setLoading] = useState(false);
   const [locationLoading, setLocationLoading] = useState(true);
 
-  const [pickupSuggestions, setPickupSuggestions] = useState<any[]>([]);
+  // Hàm tính giá sau khi áp dụng mã giảm giá (giống BookingScreen)
+  const getFinalPrice = useCallback((basePrice: number) => {
+    if (!selectedPromo) return basePrice;
+    
+    const discountValue = parseFloat(selectedPromo.value || '0');
+    if (selectedPromo.type === 'percentage') {
+      return basePrice * (1 - discountValue / 100);
+    } else {
+      return Math.max(0, basePrice - discountValue);
+    }
+  }, [selectedPromo]);
+
+  console.log('[ExpressScreen] >>> COMPONENT RENDER <<<', { isPromoModalVisible, promotionsCount: promotions.length });
+
   const [destSuggestions, setDestSuggestions] = useState<any[]>([]);
   const [pickupFocused, setPickupFocused] = useState(false);
   const [destFocused, setDestFocused] = useState(false);
@@ -61,6 +80,16 @@ export default function ExpressScreen() {
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const [vehicleQuotes, setVehicleQuotes] = useState<VehicleQuote[]>([]);
   const [quoteId, setQuoteId] = useState<string | null>(null);
+
+  // Memoize price calculation - chỉ tính lại khi vehicleQuotes, selectedVehicle, selectedPromo thay đổi
+  const { basePrice, totalPrice, discount } = useMemo(() => {
+    if (!vehicleQuotes || vehicleQuotes.length === 0) return { basePrice: 0, totalPrice: 0, discount: 0 };
+    const selectedQuote = vehicleQuotes.find(q => q.vehicle_type_id === selectedVehicle);
+    const basePrice = selectedQuote?.final_price || selectedQuote?.estimated_price || 0;
+    const discount = selectedQuote?.discount_amount || 0;
+    const totalPrice = getFinalPrice(basePrice);
+    return { basePrice, totalPrice, discount };
+  }, [vehicleQuotes, selectedVehicle, getFinalPrice]);
 
   const destInputRef = useRef<TextInput>(null);
   const destFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -190,6 +219,27 @@ export default function ExpressScreen() {
         if (payRes.ok && payData.data) {
           setPaymentMethods(payData.data);
           if (payData.data.length > 0) setSelectedPayment(payData.data[0]);
+          
+          // Fetch wallet balance
+          const walletMethod = payData.data.find((m: any) => m.code === 'wallet');
+          if (walletMethod) {
+            try {
+              const balRes = await fetch('https://admin.datxedulich.vip/api/customer/wallet/balance', { headers });
+              const balText = await balRes.text();
+              console.log('[ExpressScreen] Wallet balance raw response:', balText.substring(0, 200));
+              if (balText.startsWith('<')) {
+                console.warn('[ExpressScreen] Wallet balance API returned HTML, not JSON');
+              } else {
+                const balData = JSON.parse(balText);
+                if (balRes.ok && balData.data?.balance !== undefined) {
+                  setWalletBalance(balData.data.balance);
+                  console.log('[ExpressScreen] Wallet balance:', balData.data.balance);
+                }
+              }
+            } catch (e) {
+              console.error('[ExpressScreen] Failed to fetch wallet balance:', e);
+            }
+          }
         }
 
         const promoRes = await fetch('https://admin.datxedulich.vip/api/customer/promotions/applicable', {
@@ -202,7 +252,9 @@ export default function ExpressScreen() {
           body: JSON.stringify({}),
         });
         const promoData = await promoRes.json();
+        console.log('[ExpressScreen] Promotions API response:', promoData);
         if (promoRes.ok && promoData.data) {
+          console.log('[ExpressScreen] Setting promotions:', promoData.data.length, 'items');
           setPromotions(promoData.data);
         }
       } catch (e) {
@@ -373,6 +425,7 @@ export default function ExpressScreen() {
         dropoff_lng: dLng,
         service_type: 'delivery',
         delivery_type: deliveryType,
+        promo_code: selectedPromo?.code || null,
       });
       console.log('[ExpressScreen] API response:', JSON.stringify(res, null, 2));
       if (res.success && res.data) {
@@ -397,7 +450,7 @@ export default function ExpressScreen() {
     } finally {
       setNearbyLoading(false);
     }
-  }, [pickupCoords, deliveryType]);
+  }, [pickupCoords, deliveryType, selectedPromo]);
 
   const renderSuggestionItem = (item: PlaceSuggestion, icon: 'star' | 'location' = 'location') => (
     <TouchableOpacity
@@ -445,7 +498,7 @@ export default function ExpressScreen() {
     if (pickup.trim() && destination.trim()) {
       fetchNearbyDrivers(pickup, destination);
     }
-  }, [deliveryType]);
+  }, [deliveryType, selectedPromo]);
 
   const handleBook = async () => {
     if (!destination) {
@@ -459,6 +512,14 @@ export default function ExpressScreen() {
       showToast({ message: 'Vui lòng nhập số điện thoại người nhận', type: 'error' });
       return;
     }
+    
+    // Validate wallet balance if wallet selected
+    const paymentCode = selectedPayment?.code || 'cash';
+    if (paymentCode === 'wallet' && walletBalance < totalPrice) {
+      showToast({ message: `Số dư ví không đủ (${formatMoney(walletBalance)}đ). Cần ${formatMoney(totalPrice)}đ`, type: 'error' });
+      return;
+    }
+    
     setLoading(true);
     try {
       let dLat = dropoffCoords?.lat;
@@ -480,6 +541,7 @@ export default function ExpressScreen() {
         dropoff_lng: dLng,
         service_type: 'delivery',
         delivery_type: deliveryType,
+        promo_code: selectedPromo?.code || null,
       });
 
       if (!nearbyRes.success || !nearbyRes.quote_id) {
@@ -488,12 +550,13 @@ export default function ExpressScreen() {
       }
 
       console.log('[ExpressScreen] Creating order with quote_id:', nearbyRes.quote_id, 'vehicle_type_id:', selectedVehicle, 'typeof:', typeof selectedVehicle);
+      console.log('[ExpressScreen] Payment method:', paymentCode, 'Wallet balance:', walletBalance);
       const createRes = await deliveryService.createOrder({
         quote_id: nearbyRes.quote_id,
         vehicle_type_id: selectedVehicle,
         pickup_address: pickup,
         dropoff_address: destination,
-        payment_method: selectedPayment?.code || 'cash',
+        payment_method: paymentCode,
         promo_code: selectedPromo?.code || null,
         service_type: 'delivery',
         delivery_type: deliveryType,
@@ -529,12 +592,7 @@ export default function ExpressScreen() {
     }
   };
 
-  const selectedQuote = vehicleQuotes.find(q => q.vehicle_type_id === selectedVehicle);
-  const basePrice = selectedQuote?.final_price || selectedQuote?.estimated_price || 0;
-  const discount = selectedQuote?.discount_amount || 0;
-  const totalPrice = basePrice;
-
-  console.log('[ExpressScreen] vehicleQuotes:', vehicleQuotes.length, 'selectedVehicle:', selectedVehicle, 'totalPrice:', totalPrice);
+  console.log('[ExpressScreen] vehicleQuotes:', vehicleQuotes.length, 'selectedVehicle:', selectedVehicle, 'basePrice:', basePrice, 'totalPrice:', totalPrice, 'hasPromo:', !!selectedPromo, 'promoCode:', selectedPromo?.code);
 
   return (
     <View style={styles.container}>
@@ -583,13 +641,14 @@ export default function ExpressScreen() {
       </LinearGradient>
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
+        keyboardVerticalOffset={0}
       >
         <ScrollView
           style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 160 }}
+          contentContainerStyle={{ paddingBottom: 240 }}
           keyboardShouldPersistTaps="always"
         >
           {/* Location Card - same as BookingScreen */}
@@ -943,7 +1002,7 @@ export default function ExpressScreen() {
       </KeyboardAvoidingView>
 
       {/* Footer */}
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: insets.bottom > 0 ? insets.bottom : (Platform.OS === 'ios' ? 25 : 20) }]}>
           <View style={styles.footerInner}>
             <View style={styles.priceSection}>
               <View>
@@ -956,27 +1015,33 @@ export default function ExpressScreen() {
             </View>
 
             <View style={styles.quickOptionsRow}>
-              <TouchableOpacity
-                style={styles.paymentPill}
-                onPress={() => setIsPaymentModalVisible(true)}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.pillIconBox, { backgroundColor: '#FFF' }]}>
-                  <Ionicons
-                    name={selectedPayment?.code === 'wallet' ? 'wallet' : 'card'}
-                    size={16}
-                    color={COLORS.primary}
-                  />
-                </View>
-                <Text style={styles.pillLabel} numberOfLines={1}>
-                  {selectedPayment?.name || 'Tiền mặt'}
-                </Text>
-                <Ionicons name="chevron-down" size={14} color="#666" />
-              </TouchableOpacity>
+<TouchableOpacity
+    style={[styles.paymentPill, selectedPayment && styles.pillLabelActive]}
+    onPress={() => {
+      console.log('[ExpressScreen] >>> PAYMENT PILL CLICKED <<<');
+      setIsPaymentModalVisible(true);
+    }}
+    activeOpacity={0.8}
+  >
+   <View style={[styles.pillIconBox]}>
+     <Ionicons
+       name={selectedPayment?.code === 'wallet' ? 'wallet' : 'card'}
+       size={16}
+       color={COLORS.primary}
+     />
+   </View>
+   <Text style={[styles.pillLabel, selectedPayment && styles.pillLabelActive]} numberOfLines={1}>
+     {selectedPayment?.name || 'Tiền mặt'}
+   </Text>
+   <Ionicons name="chevron-down" size={14} color="#666" />
+</TouchableOpacity>
 
               <TouchableOpacity
                 style={[styles.promoPill, selectedPromo && styles.promoPillActive]}
-                onPress={() => setIsPromoModalVisible(true)}
+                onPress={() => {
+                  console.log('[ExpressScreen] >>> PROMO PILL CLICKED <<<', { isPromoModalVisible, promotionsCount: promotions.length, selectedPromo: selectedPromo?.code });
+                  setIsPromoModalVisible(true);
+                }}
                 activeOpacity={0.8}
               >
                 <Ionicons
@@ -985,7 +1050,7 @@ export default function ExpressScreen() {
                   color={selectedPromo ? '#fff' : COLORS.primary}
                 />
                 <Text style={[styles.pillLabel, selectedPromo && { color: '#fff' }]} numberOfLines={1}>
-                  {selectedPromo ? selectedPromo.code : 'Ưu đãi'}
+                  {selectedPromo?.code || 'Chưa chọn'}
                 </Text>
                 <View style={styles.promoDot} />
               </TouchableOpacity>
@@ -993,7 +1058,10 @@ export default function ExpressScreen() {
 
             <TouchableOpacity
               style={[styles.bookBtn, loading && { opacity: 0.6 }]}
-              onPress={handleBook}
+              onPress={() => {
+                console.log('[ExpressScreen] >>> BOOK BUTTON CLICKED <<<');
+                handleBook();
+              }}
               disabled={loading}
               activeOpacity={0.8}
             >
@@ -1032,15 +1100,43 @@ export default function ExpressScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
+              {console.log('[ExpressScreen] Modal render - promotions:', promotions.length, 'selectedPromo:', selectedPromo?.code)}
               {promotions.length > 0 ? promotions.map((item) => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={[styles.selectionItem, selectedPromo?.id === item.id && styles.selectionItemActive]}
-                  onPress={() => {
-                    setSelectedPromo(item);
-                    setIsPromoModalVisible(false);
-                  }}
-                >
+                 <TouchableOpacity
+                   key={item.id}
+                   style={[styles.selectionItem, selectedPromo?.id === item.id && styles.selectionItemActive]}
+onPress={() => {
+                      console.log('[ExpressScreen] 🎯 Promo item pressed:', { itemId: item.id, itemCode: item.code, hasVehicleQuotes: vehicleQuotes.length > 0, selectedVehicle });
+                      setSelectedPromo(item);
+                      setIsPromoModalVisible(false);
+                      const currentQuote = vehicleQuotes.find(q => q.vehicle_type_id === selectedVehicle);
+                      const basePrice = currentQuote?.final_price || currentQuote?.estimated_price || 0;
+                      let finalPrice = basePrice;
+                      let discountAmount = 0;
+                      if (item.type === 'percentage') {
+                        const promoValue = parseFloat(item.value || '0');
+                        discountAmount = basePrice * (promoValue / 100);
+                        finalPrice = basePrice - discountAmount;
+                      } else {
+                        discountAmount = parseFloat(item.value || '0');
+                        finalPrice = Math.max(0, basePrice - discountAmount);
+                      }
+                      console.log('[ExpressScreen] 🎫 Ưu đãi được chọn:', {
+                        code: item.code,
+                        name: item.name,
+                        type: item.type,
+                        value: item.value,
+                        basePrice: basePrice,
+                        discountAmount: discountAmount,
+                        finalPrice: finalPrice,
+                        formatted: {
+                          basePrice: formatMoney(basePrice) + 'đ',
+                          discount: '-' + formatMoney(discountAmount) + 'đ',
+                          finalPrice: formatMoney(finalPrice) + 'đ'
+                        }
+                      });
+                    }}
+                 >
                   <View style={styles.promoIconBox}>
                     <Ionicons name="ticket" size={24} color={COLORS.primary} />
                   </View>
@@ -1120,6 +1216,44 @@ export default function ExpressScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
+  promoPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  promoPillActive: {
+    backgroundColor: COLORS.primary,
+  },
+  paymentPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  pillIconBox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pillLabel: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: COLORS.text,
+  },
+  pillLabelActive: {
+    color: COLORS.primary,
+  },
 
   /* Header */
   headerGradient: {
@@ -1236,7 +1370,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     position: 'relative',
     height: 300,
-    zIndex: 2000,
+    zIndex: 100,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -1349,7 +1483,7 @@ const styles = StyleSheet.create({
   formDivider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 12 },
 
   /* Speed */
-  speedRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 12, marginBottom: 60 },
+  speedRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 12, marginBottom: 20 },
   speedCard: {
     flex: 1, backgroundColor: '#fff', borderRadius: 18, padding: 18,
     alignItems: 'center', borderWidth: 2, borderColor: '#F1F5F9', ...SHADOW.sm,
@@ -1390,11 +1524,11 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 30,
     ...SHADOW.lg,
     shadowOpacity: 0.1,
-    paddingBottom: Platform.OS === 'ios' ? 25 : 60,
+    zIndex: 1000,
   },
   footerInner: {
     paddingHorizontal: 20,
-    paddingTop: 15,
+    paddingTop: 20,
   },
   priceSection: {
     marginBottom: 16,
@@ -1409,7 +1543,7 @@ const styles = StyleSheet.create({
   quickOptionsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 15,
+    marginBottom: 20,
     gap: 12,
   },
   paymentPill: {
