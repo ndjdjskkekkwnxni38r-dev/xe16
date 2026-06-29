@@ -1,14 +1,14 @@
+import { useToast } from '@/components/Toast';
 import { POPULAR_DESTINATIONS, type PlaceSuggestion } from '@/constants/data';
 import { COLORS, SHADOW } from '@/constants/theme';
-import { searchAddressSuggestions, geocodeByText } from '@/services/addressSearch';
+import { geocodeByText, searchAddressSuggestions } from '@/services/addressSearch';
 import { deliveryService, type VehicleQuote } from '@/services/deliveryService';
-import { useToast } from '@/components/Toast';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
-import { Search, X } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
+import { Search, X } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -25,7 +25,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Animated, { FadeInDown, SlideInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
@@ -1349,7 +1349,7 @@ const styles = StyleSheet.create({
   formDivider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 12 },
 
   /* Speed */
-  speedRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 12, marginBottom: 20 },
+  speedRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 12, marginBottom: 60 },
   speedCard: {
     flex: 1, backgroundColor: '#fff', borderRadius: 18, padding: 18,
     alignItems: 'center', borderWidth: 2, borderColor: '#F1F5F9', ...SHADOW.sm,
@@ -1390,11 +1390,11 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 30,
     ...SHADOW.lg,
     shadowOpacity: 0.1,
-    paddingBottom: Platform.OS === 'ios' ? 25 : 15,
+    paddingBottom: Platform.OS === 'ios' ? 25 : 60,
   },
   footerInner: {
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: 15,
   },
   priceSection: {
     marginBottom: 16,
@@ -1409,7 +1409,7 @@ const styles = StyleSheet.create({
   quickOptionsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: 15,
     gap: 12,
   },
   paymentPill: {

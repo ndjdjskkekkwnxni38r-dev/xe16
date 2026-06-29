@@ -1,14 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  StyleSheet, Text, View, Animated, Easing, TouchableOpacity,
-  SafeAreaView, StatusBar, Platform,
-} from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SHADOW } from '@/constants/theme';
 import socketService from '@/services/socket';
 import { useUser } from '@/store/UserContext';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Animated, Easing,
+  Platform,
+  SafeAreaView, StatusBar,
+  StyleSheet, Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 type StatusMessage = {
   title: string;
@@ -362,7 +366,7 @@ const styles = StyleSheet.create({
   progressDot: { width: 8, height: 8, borderRadius: 4 },
 
   /* Bottom */
-  bottomSection: { paddingHorizontal: 24, paddingBottom: Platform.OS === 'ios' ? 36 : 24 },
+  bottomSection: { paddingHorizontal: 24, paddingBottom: Platform.OS === 'ios' ? 36 : 50 },
   actionRow: { gap: 12, alignItems: 'center' },
   retryBtn: { borderRadius: 14, overflow: 'hidden', width: '100%' },
   retryGradient: {
