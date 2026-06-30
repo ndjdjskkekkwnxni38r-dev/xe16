@@ -53,6 +53,7 @@ export default function ExpressScreen() {
   const [selectedPayment, setSelectedPayment] = useState<any>(null);
   const [isPaymentModalVisible, setIsPaymentModalVisible] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [walletBalanceFetched, setWalletBalanceFetched] = useState(false);
   const [pickup, setPickup] = useState('255 Hùng Vương, Đà Nẵng');
   const [destination, setDestination] = useState('');
   const [loading, setLoading] = useState(false);
@@ -220,25 +221,21 @@ export default function ExpressScreen() {
           setPaymentMethods(payData.data);
           if (payData.data.length > 0) setSelectedPayment(payData.data[0]);
           
-          // Fetch wallet balance
-          const walletMethod = payData.data.find((m: any) => m.code === 'wallet');
-          if (walletMethod) {
-            try {
-              const balRes = await fetch('https://admin.datxedulich.vip/api/customer/wallet/balance', { headers });
-              const balText = await balRes.text();
-              console.log('[ExpressScreen] Wallet balance raw response:', balText.substring(0, 200));
-              if (balText.startsWith('<')) {
-                console.warn('[ExpressScreen] Wallet balance API returned HTML, not JSON');
-              } else {
-                const balData = JSON.parse(balText);
-                if (balRes.ok && balData.data?.balance !== undefined) {
-                  setWalletBalance(balData.data.balance);
-                  console.log('[ExpressScreen] Wallet balance:', balData.data.balance);
-                }
-              }
-            } catch (e) {
-              console.error('[ExpressScreen] Failed to fetch wallet balance:', e);
+          // Fetch wallet balance from /api/user/info
+          try {
+            const userRes = await fetch('https://admin.datxedulich.vip/api/user/info', { headers });
+            const userData = await userRes.json();
+            if (userRes.ok && userData.data?.balance !== undefined) {
+              const balance = parseFloat(userData.data.balance) || 0;
+              setWalletBalance(balance);
+              console.log('[ExpressScreen] ✅ Wallet balance set:', balance);
+            } else {
+              console.log('[ExpressScreen] User info API error:', userData);
             }
+            setWalletBalanceFetched(true);
+          } catch (e) {
+            console.error('[ExpressScreen] Failed to fetch wallet balance:', e);
+            setWalletBalanceFetched(true);
           }
         }
 
@@ -515,7 +512,8 @@ export default function ExpressScreen() {
     
     // Validate wallet balance if wallet selected
     const paymentCode = selectedPayment?.code || 'cash';
-    if (paymentCode === 'wallet' && walletBalance < totalPrice) {
+    console.log('[ExpressScreen] 💰 Wallet check:', { paymentCode, walletBalance, totalPrice, hasEnough: walletBalance >= totalPrice, walletBalanceFetched });
+    if (paymentCode === 'wallet' && walletBalanceFetched && walletBalance < totalPrice) {
       showToast({ message: `Số dư ví không đủ (${formatMoney(walletBalance)}đ). Cần ${formatMoney(totalPrice)}đ`, type: 'error' });
       return;
     }
@@ -1008,7 +1006,7 @@ export default function ExpressScreen() {
               <View>
                 <Text style={styles.totalLabel}>Tổng cộng</Text>
                 <View style={styles.priceRow}>
-                  {discount > 0 && <Text style={styles.oldPrice}>{formatMoney(selectedQuote?.estimated_price || 0)}đ</Text>}
+                  {discount > 0 && <Text style={styles.oldPrice}>{formatMoney(basePrice + discount)}đ</Text>}
                   <Text style={styles.totalPrice}>{formatMoney(totalPrice)}đ</Text>
                 </View>
               </View>
